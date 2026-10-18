@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import dev.local.fuxicontrol.BuildConfig
 import dev.local.fuxicontrol.R
 import dev.local.fuxicontrol.core.AppSearch
 import dev.local.fuxicontrol.core.Policy
@@ -344,13 +343,13 @@ private fun Controller() {
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                if (page == "概览") "当前策略与运行状态"
-                                else if (page == "应用策略") packageName else "应用与后台管理",
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                            if (page == "概览" || page == "应用策略")
+                                Text(
+                                    if (page == "概览") "当前策略与运行状态" else packageName,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
                         }
                     }
                 },
@@ -509,11 +508,6 @@ private fun Controller() {
                                     "执行异常：${status.getString("lastError")}",
                                     color = MaterialTheme.colorScheme.error,
                                 )
-                            SectionTitle("后台行为")
-                            Text(
-                                "音乐、导航和下载的活动状态由服务判断。此页不估算省电比例。",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
                         }
                     }
                     "应用" -> {
@@ -661,16 +655,13 @@ private fun Controller() {
                             if (AppSearch.textMatches("默认模板 自启动 后台 资源 CPU 内存 网络 权限", policySearch))
                                 Entry("默认模板", "自启动、后台、资源、网络与权限") { openEditor("默认模板") }
                             if (AppSearch.textMatches("自动化 规则", policySearch))
-                                Entry(
-                                    "自动化",
-                                    "${config.optJSONArray("rules")?.length() ?: 0} 条规则 · 高级编辑器",
-                                ) {
+                                Entry("自动化", "${config.optJSONArray("rules")?.length() ?: 0} 条规则") {
                                     openEditor("自动化")
                                 }
                             if (AppSearch.textMatches("推送", policySearch))
                                 Entry(
                                     "推送",
-                                    "${config.optJSONObject("pushProxy")?.length() ?: 0} 个应用 · 高级编辑器",
+                                    "${config.optJSONObject("pushProxy")?.length() ?: 0} 个应用",
                                 ) {
                                     openEditor("推送")
                                 }
@@ -712,11 +703,6 @@ private fun Controller() {
                     }
                     "设置" ->
                         item {
-                            SectionTitle("栖序 · Qixu")
-                            Text(
-                                "${BuildConfig.VERSION_NAME} · 原生简洁\n本机策略管理，沿用 Fuxi Control 服务与 CLI。",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
                             SectionTitle("诊断与高级")
                             listOf(
                                     "系统能力" to "capabilities",
@@ -740,10 +726,6 @@ private fun Controller() {
                     "原始配置" ->
                         item {
                             SectionTitle("高级编辑器")
-                            Text(
-                                "保留完整配置能力。保存时校验版本，冲突必须重新加载。",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
                             OutlinedTextField(
                                 draft,
                                 { draft = it },
@@ -767,7 +749,7 @@ private fun Controller() {
                         item {
                             SectionTitle("本机或 adb root")
                             Text(
-                                "/data/adb/fuxicontrol/fuxictl status\n\nfuxictl apps\nfuxictl explain PACKAGE\nfuxictl defaults show\nfuxictl config export FILE\nfuxictl help\n\n完整命令由原 CLI 提供；图形界面与 CLI 共享配置版本。",
+                                "/data/adb/fuxicontrol/fuxictl status\n\nfuxictl apps\nfuxictl explain PACKAGE\nfuxictl defaults show\nfuxictl config export FILE\nfuxictl help",
                                 style = MaterialTheme.typography.bodyLarge,
                             )
                         }

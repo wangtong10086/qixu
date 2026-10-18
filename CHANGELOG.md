@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Remove development, design and implementation commentary from the overview, settings and editors; retain actionable guidance and errors.
+
 ## 0.3.0
 
 - Search application names, package IDs, declared/granted permissions and effective policy keywords from applications and policies.

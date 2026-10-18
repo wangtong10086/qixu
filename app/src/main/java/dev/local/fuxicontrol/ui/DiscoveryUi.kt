@@ -53,8 +53,7 @@ internal fun DiscoverySearch(
             }
     }
     Text(
-        if (scope == "granted") "系统权限授予状态；实际使用仍受 AppOps 和前后台条件限制。"
-        else "支持相机、定位、CAMERA、禁止自启；空格分隔多个条件。",
+        if (scope == "granted") "已授予权限不代表允许在后台使用。" else "多个关键词用空格分隔。",
         style = MaterialTheme.typography.bodySmall,
     )
 }
@@ -87,20 +86,6 @@ internal fun RunningSummary(snapshot: JSONObject?, failure: String, onSelect: (S
                         }
                     }
                 }
-                val time =
-                    java.text
-                        .SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-                        .format(
-                            java.util.Date(
-                                System.currentTimeMillis() -
-                                    android.os.SystemClock.elapsedRealtime() +
-                                    snapshot.getLong("capturedAtElapsedMs")
-                            )
-                        )
-                Text(
-                    "快照 $time · 可见页面每 5 秒刷新\n前台为系统进程级别；缓存不代表持续执行",
-                    style = MaterialTheme.typography.bodySmall,
-                )
             }
             if (failure.isNotEmpty())
                 Text(
