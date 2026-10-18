@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "revision": 0,
+  "mode": "observe",
+  "defaults": {
+    "autostart": "deny", "background": "balanced",
+    "cpuNice": 5, "uclampMax": 1024,
+    "memoryHighMiB": 0, "memoryMaxMiB": 0,
+    "uploadBps": 0, "downloadBps": 0, "burstBytes": 65536,
+    "network": "allow", "permissions": {}, "appOps": {},
+    "wakeLocks": [], "cleanupOnTaskRemoved": false, "resident": false
+  },
+  "apps": {},
+  "rules": [],
+  "pushProxy": {}
+}

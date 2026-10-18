@@ -12,3 +12,15 @@ native/*.o
 app/src/main/jniLibs/
 app/src/main/assets/network.bpf.o
 vendor/*.jar
+.kotlin/
+*.p12
+*.pem
+*.key
+*.apk
+.env
+.env.*
+# Local design exports and device screenshots may contain personal app inventories.
+docs/ui-previews/
+docs/ui-design-brief.md
+docs/qixu/*.png
+!docs/qixu/icon.png

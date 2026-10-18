@@ -5,3 +5,5 @@ dependencies {
     testImplementation("org.json:json:20240303")
     testImplementation("junit:junit:4.13.2")
 }
+
+sourceSets { test { resources.srcDir("../examples") } }

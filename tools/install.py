@@ -1,6 +1,8 @@
-"""Install the new controller in observation mode. Does not enable Vector or alter Thanox."""
+"""Install the controller; fresh installs observe, upgrades preserve policy and mode.
+
+Vector activation and optional Thanox migration are separate operations.
+"""
 import hashlib
-import json
 from pathlib import Path
 import re
 import shlex
@@ -13,16 +15,6 @@ parser=argparse.ArgumentParser()
 parser.add_argument("--apk",type=Path,default=project/"app/build/outputs/apk/debug/app-debug.apk")
 options=parser.parse_args()
 apk=options.apk
-baselines=sorted((project / "private").glob("baseline-*/manifest.json"))
-if not baselines:
-    raise RuntimeError("Run export_thanos.py before installation")
-manifest=baselines[-1]
-for name,expected in json.loads(manifest.read_text())["sha256"].items():
-    if hashlib.sha256((manifest.parent/name).read_bytes()).hexdigest()!=expected:
-        raise RuntimeError("Baseline checksum mismatch: "+name)
-import gzip,io,tarfile
-with tarfile.open(fileobj=io.BytesIO(gzip.decompress((manifest.parent/"original-state.tar.gz").read_bytes()))) as original:
-    original.getmembers()
 cert = subprocess.check_output(["apksigner", "verify", "--print-certs", str(apk)], text=True)
 signer = re.search(r"Signer #1 certificate SHA-256 digest: ([0-9a-f]+)", cert).group(1)
 # Capture this controller's own state before replacing its executable files.

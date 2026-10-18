@@ -1,0 +1,9 @@
+Qixu / 栖序
+Copyright 2026 Qixu contributors.
+
+Project-authored code is licensed under Apache-2.0 except files with an explicit
+SPDX license identifier. The BPF program and its shared headers have separate
+license choices described in THIRD_PARTY_NOTICES.md.
+
+This distribution contains modern libxposed API source (compile-only), Lucide
+vector paths, and the Gradle wrapper. Preserve their original license notices.

@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a reproducible Qixu defect
+title: "[Bug] "
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Qixu commit/version, Android/ROM, kernel, Magisk and Vector versions. No serial numbers.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence
+      description: Remove tokens, identifiers, messages and personal app/config data. Report vulnerabilities privately.

@@ -1,0 +1,47 @@
+name: Android CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install native and Android toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 linux-libc-dev
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;35.0.0" "ndk;29.0.14206865"
+      - name: Build vendored API and native artifacts
+        env:
+          BPF_CLANG: clang-18
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          python3 tools/build_api.py
+          python3 tools/build_native.py
+      - name: Host tests and Android build
+        run: |
+          cc -Wall -Wextra -Werror native/budget_test.c -o /tmp/qixu-budget-test
+          /tmp/qixu-budget-test
+          python3 -m compileall -q tools
+          ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :probe:assembleDebug :design-preview:assembleDebug
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verification-reports
+          path: |
+            core/build/reports/
+            app/build/reports/
+          if-no-files-found: warn

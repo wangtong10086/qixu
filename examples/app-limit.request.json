@@ -1,0 +1,7 @@
+{
+  "command": "app.replace",
+  "package": "com.example.app",
+  "patch": {"uploadBps": 512000, "downloadBps": 2000000},
+  "expectedRevision": 0,
+  "dryRun": true
+}

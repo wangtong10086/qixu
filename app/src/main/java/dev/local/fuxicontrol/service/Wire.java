@@ -10,6 +10,9 @@ import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
 public final class Wire {
+    public static final class CommandException extends IOException {
+        public CommandException(String message) { super(message); }
+    }
     public static final String ADDRESS = "fuxicontrol.v1";
     public static LocalSocket connect() throws IOException {
         LocalSocket socket = new LocalSocket();
@@ -26,7 +29,7 @@ public final class Wire {
             String line = reader(socket).readLine();
             if (line == null) throw new IOException("Controller disconnected before responding");
             JSONObject response = new JSONObject(line);
-            if (!response.getBoolean("ok")) throw new IOException(response.getString("error"));
+            if (!response.getBoolean("ok")) throw new CommandException(response.getString("error"));
             return response.getJSONObject("result");
         }
     }

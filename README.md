@@ -1,78 +1,64 @@
-# Fuxi Control
+# 栖序 · Qixu
 
-独立源码的 Android 16 应用策略管理器：root 服务、现代 Vector API 102 系统钩子、Compose 管理界面及 CLI。
+[![Android CI](https://github.com/wangtong10086/qixu/actions/workflows/android.yml/badge.svg)](https://github.com/wangtong10086/qixu/actions/workflows/android.yml)
 
-**已导入现有活动策略并切换到执行模式；Thanox 模块和应用已停用，数据保留。重启后服务、管理界面、Play Integrity 三绿和 Wallet 安全要求已复测通过。**
-现有银行兼容、Play Integrity、NFC 和电源键钱包模块独立保留。
+面向 **Android 16、Magisk 与 Vector API 102** 的开源应用策略管理器。通过原生 Compose 界面和 root CLI，管理自启动、后台运行、CPU 调度、内存、逐 UID 网络限速与权限。
 
-## 构建
+<img src="docs/qixu/icon.svg" alt="栖序图标" width="96" />
 
-需要 JDK 17、Android SDK 36、Build Tools 35、NDK 29 和支持 BPF 的 clang。
-在 `local.properties` 指定 `sdk.dir`，或设置 `ANDROID_HOME`。
+当前为 **0.2.0 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
+
+## 能力
+
+- 普通应用继承可修改的默认模板；逐应用仅存例外，系统角色与关键服务有保护基线。
+- 后台自启动、广播、服务、作业与指定 WakeLock 管理；活动任务、音乐等运行状态参与豁免。
+- nice / uclamp、cgroup 内存回收阈值与硬上限；支持恢复原设置。
+- eBPF 逐 UID 上传／下载限速与超限丢包统计，保留原 Android 网络检查路径。
+- 权限和 AppOps 模板，初始没有拒绝清单；类型化自动化、推送代理。
+- Material 3 浅色界面、版本冲突检查、影响摘要与恢复继承；自动化和推送使用高级 JSON 编辑器。
+- 本机 root 与 adb root CLI 完整控制；管理界面按 UID 和签名认证。
+
+限速默认关闭；硬内存限制可能终止应用。没有未经测量的省电比例，也不把启动成功当成所有业务功能正常。
+
+## 开始使用
+
+1. 按 [构建指南](docs/build.md) 安装工具链并生成 APK、原生库与服务工具。
+2. 按 [安装与恢复](docs/install.md) 安装服务；首次安装保持观察模式。
+3. 在 Vector 中启用模块的 Android 系统作用域，重启并检查能力，再选择执行模式。
 
 ```sh
 export JAVA_HOME=/path/to/jdk17
-export ANDROID_NDK_HOME=/path/to/ndk/29.0.14206865
+export ANDROID_HOME=/path/to/android-sdk
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
 python3 tools/build_api.py
 python3 tools/build_native.py
-./gradlew :core:test :app:assembleDebug :probe:assembleDebug
+./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
 ```
 
-原生构建支持 Linux NDK，也支持 WSL 调用 Windows NDK。
-调试签名仅用于开发；本机接管使用固定项目 release 签名，并已完成恢复验证。
-私有备份、设备配置、构建产物和密钥均不进入源码仓库。
-
-## 安装与 CLI
+仅查看 UI 候选设计可单独构建 `:design-preview:assembleDebug`，不需要 root、Vector 或原生构建。
 
 ```sh
-python3 tools/export_thanos.py
-python3 tools/install.py
 adb shell su -c '/data/adb/fuxicontrol/fuxictl status'
-adb shell su -c '/data/adb/fuxicontrol/fuxictl help'
+adb shell su -c '/data/adb/fuxicontrol/fuxictl explain com.example.app'
 ```
 
-导出先备份，文件名带时间，不覆盖旧备份。安装保留现有策略与 Thanox 状态。
-CLI 使用 root 权限；普通 shell 无写权限。界面需要匹配管理应用 UID 和固定签名摘要。
-系统钩子连接只允许事件、状态和策略订阅。所有控制使用同一 JSON 命令协议。
+兼容现有安装：包名仍为 `dev.local.fuxicontrol`，CLI 为 `fuxictl`，设备数据目录为 `/data/adb/fuxicontrol`。源码和构建流程公开；不提供任何私有签名密钥。自行构建与已安装版本的签名不同，不能直接覆盖升级。
 
-```sh
-fuxictl defaults show
-fuxictl app show com.example.app
-fuxictl app set com.example.app autostart deny
-fuxictl limit set com.example.app --upload 512kbps --download 2mbps
-fuxictl app inherit com.example.app
-fuxictl config export /data/local/tmp/policy-backup.json
-fuxictl mode observe
-```
+## 文档与目录
 
-`rpc JSON` 提供完整协议入口；变更支持 `--dry-run`。配置中的速率单位为十进制 bit/s，0 表示不限速。
-普通应用始终继承当前默认模板，逐应用仅保存例外。系统、默认输入法、钱包、VPN 等关键服务受保护。
-隐私模板初始为空。运行时权限及 AppOps 变更记录原值，停用时恢复仍由本服务管理的设置。
+| 入口 | 内容 |
+| --- | --- |
+| [架构](docs/architecture.md) | 模块、数据流与权限边界 |
+| [策略](docs/policy.md) / [控制协议](docs/protocol.md) | 字段、继承、JSON socket 与 CLI |
+| [示例](examples/README.md) | 合成配置与命令，不包含个人策略 |
+| [安装](docs/install.md) / [迁移](docs/migration.md) | 观察模式、升级、恢复与受限 Thanox 导入 |
+| [验证记录](docs/validation.md) / [UI](docs/qixu/README.md) | 已测平台、验证边界和界面验收 |
+| [贡献](CONTRIBUTING.md) / [安全](SECURITY.md) | 开发、测试和私密漏洞报告 |
 
-## 网络限速
+`app/`：界面、系统钩子、root 服务与 CLI；`core/`：策略与自动化；`native/`：JNI、eBPF 与网络工具；`probe/`：可丢弃的验证应用；`design-preview/`：合成数据 UI 原型；`tools/`：构建、安装与显式实机测试。
 
-使用按 socket UID 分方向的 BPF 令牌桶，超限丢包，提供通过与丢弃的字节/包计数。
-TCP 实际吞吐可能低于上限；允许一个配置的突发窗口，不能用短时读数判断长期上限。
-限速不是 CPU 百分比配额，也不保证省电；默认关闭。
+## 开源许可
 
-当前 ROM 在根 cgroup 中使用不可覆盖的单程序 Android 网络检查。网络控制器保留并固定原程序，
-先填好尾调用表，再原子替换入口；通过限速检查的流量继续执行原有 Android 检查。
-尾调用失败会丢包，不能绕过系统权限。停用只恢复当前仍指向本控制器的入口。
-不清空系统防火墙、tc、netd 或其他模块的 BPF 规则。
+项目自有代码默认 **Apache-2.0**，详见 [LICENSE](LICENSE)。`native/network.bpf.c` 为 **GPL-2.0-only**；共享头文件为 **Apache-2.0 OR GPL-2.0-only**。Vector API、Lucide、Gradle 等第三方来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-## 验收状态
-
-见 [docs/validation.md](docs/validation.md)。观察模式不施加应用限制。
-全局执行等待系统钩子与前台快照就绪。真实微信 FCM、VPN 流量及 SDK sandbox 专项测试仍待完成。
-
-## 回退
-
-本机接管前已保存原回调及 Thanox 配置。恢复新服务管理的设置并重新启用 Thanox：
-
-```sh
-adb shell su -c 'sh /data/adb/fuxicontrol/restore-thanox.sh'
-adb reboot
-```
-
-该脚本保留新应用和全部旧数据，停用新服务启动脚本及系统钩子。
-只想暂停策略时使用 `fuxictl mode observe`，无需切换模块。
+本项目独立开发，与 Thanox、Google、Xiaomi 或 Vector 上游不存在官方关联。支持范围与迁移限制以本仓库文档为准。
