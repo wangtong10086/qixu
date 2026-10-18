@@ -89,16 +89,20 @@ assert any(n.get('content-desc','').endswith('图标') for n in dump()), 'Policy
 capture('policy-search')
 tap('清除');tap('概览')
 after=rpc('config.get')
-assert before == after, 'Read-only acceptance changed configuration'
+# Observer events may advance the catalog revision independently of policy content.
+assert {k:v for k,v in before.items() if k!='revision'} == {k:v for k,v in after.items() if k!='revision'}, 'Read-only acceptance changed policy'
 assert all(rpc('status')['hooks'].values())
 print('PASS UI search, permission scopes, running view, policy search; policy unchanged',flush=True)
 
 if '--preview-lifecycle' in __import__('sys').argv:
     preview=PACKAGE+'.design'
-    adb('shell','am','start','-W','-n',preview+'/.DesignActivity')
-    assert preview in rpc('apps.running')['apps'], 'Preview process missing after launch'
-    adb('shell','am','force-stop',preview)
+    try:
+        adb('shell','am','start','-W','-n',preview+'/.DesignActivity')
+        assert preview in rpc('apps.running')['apps'], 'Preview process missing after launch'
+    finally:
+        adb('shell','am','force-stop',preview)
+        adb('shell','am','start','-W','-n',PACKAGE+'/.ui.MainActivity')
     assert preview not in rpc('apps.running')['apps'], 'Stopped preview retained as live'
-    adb('shell','am','start','-W','-n',PACKAGE+'/.ui.MainActivity')
-    assert before == rpc('config.get'), 'Preview test changed policy'
+    after=rpc('config.get')
+    assert {k:v for k,v in before.items() if k!='revision'} == {k:v for k,v in after.items() if k!='revision'}, 'Preview test changed policy'
     print('PASS preview start/stop reflected in real process list; policy unchanged',flush=True)

@@ -47,7 +47,7 @@ def capture(name):
     print('CHECK '+name,flush=True)
     (shots/(name+'.png')).write_bytes(adb('exec-out','screencap','-p',binary=True))
 
-before=root('/data/adb/fuxicontrol/fuxictl rpc \'{"command":"config.get"}\'')
+before=json.loads(root('/data/adb/fuxicontrol/fuxictl rpc \'{"command":"config.get"}\''))
 adb('shell','am','force-stop','dev.local.fuxicontrol')
 adb('shell','am','start','-W','-n','dev.local.fuxicontrol/.ui.MainActivity')
 check('已连接');capture('overview')
@@ -65,8 +65,10 @@ tap('系统能力');check('requiredVectorApi');tap('返回')
 tap('策略');tap('自动化');check('高级编辑器');tap('返回')
 tap('推送');check('高级编辑器');tap('返回')
 tap('概览');check('正在执行')
-after=root('/data/adb/fuxicontrol/fuxictl rpc \'{"command":"config.get"}\'')
-assert before==after,'Read-only UI test changed real policy'
+after=json.loads(root('/data/adb/fuxicontrol/fuxictl rpc \'{"command":"config.get"}\''))
+# Package/permission observer events can advance revision without changing policy.
+assert {k:v for k,v in before.items() if k!='revision'}=={k:v for k,v in after.items() if k!='revision'},'Read-only UI test changed real policy'
+print(f"Policy revisions: {before['revision']} -> {after['revision']}")
 print('PASS overview, app filters/search/detail, template form/summary, unsaved discard, diagnostics, automation and push; policy unchanged')
 
 # Optional real-write test targets only the separate design-preview application.
