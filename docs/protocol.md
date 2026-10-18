@@ -39,6 +39,9 @@ All names below are literal `command` values. `package` is an Android package na
 | --- | --- | --- |
 | `status`, `capabilities` | none | Runtime/hook status or kernel capabilities |
 | `apps` | none | `{apps:[...]}` with package, UID, label, system and protected flags |
+| `apps.index` | optional `query` (default empty), `scope` (default `all`) | `{apps:[...],revision,capturedAtElapsedMs}` including requested permissions, effective policies and lastUpdateTime |
+| `apps.running` | none | `{apps:{package:{state,importance,processes,activeTask,foregroundService}},capturedAtElapsedMs,systemProcessCount}` |
+| `app.icon` | `package` | `{png:base64}` with a 128 × 128 PNG loaded through PackageManager |
 | `config.get` | none | Full policy object |
 | `defaults.get` | none | Default policy fields |
 | `app.get`, `explain` | `package` | revision, effective, overrides, runtime |
@@ -81,3 +84,40 @@ Push proxy entries are keyed by package. Supported boolean fields are `enabled`,
 ## Compatibility
 
 The v1 address and schema are retained for existing installations. New optional fields must not silently change the meaning of existing values. Breaking changes require an explicit schema/protocol migration and updated fixtures. Root storage paths and the historical Fuxi package ID are compatibility identifiers, not the current product name.
+
+## Application discovery (0.3)
+
+These commands are read-only and require root or the authenticated manager, like `apps`.
+`apps.index` is separate from the lightweight catalog/watch stream so permission metadata does not inflate hook traffic.
+Each permission contains `name`, localized `label` and `granted`, from `PackageInfo.REQUESTED_PERMISSION_GRANTED`.
+This is a package permission grant, not proof that AppOps, special access or current foreground conditions allow use.
+The index is freshly read on refresh/resume/navigation, not polled with the running list. Install/update changes invalidate the existing catalog; UI icons use `lastUpdateTime` in their cache keys.
+
+Scopes: `all` (name + permissions + effective policy), `name`, `declared`, `granted`, `policy`.
+Whitespace-separated terms are case-insensitive AND conditions over the selected text, with literal substring matching.
+Chinese aliases cover common permissions such as 相机、定位、麦克风; raw permission names also work.
+`policy` searches canonical effective policy fields and Chinese summaries such as 禁止自启、限速、常驻.
+It describes configured effective rules, not proof that every runtime action succeeded; consult `status.lastError`.
+
+```sh
+fuxictl search CAMERA declared
+fuxictl search CAMERA granted
+fuxictl search 'example 定位' all
+fuxictl search 限速 policy
+fuxictl running
+fuxictl rpc '{"command":"app.icon","package":"com.example.app"}'
+```
+
+Running membership uses `ActivityManager.getRunningAppProcesses()` and each process's actual `pkgList`.
+It does not mark every shared-UID sibling as running, and does not infer liveness from installed or configured app counts.
+The catalog covers the current service user's installed application UIDs; this is not a list of every native/system process or all Android users.
+Each app is grouped by its most important process: importance ≥ 400 is cached, ≤ 100 foreground, ≤ 200 visible except importance 125 (foreground service), otherwise background.
+“Foreground” is Android's importance class, not necessarily the app owning the focused window.
+`foregroundService` means at least one process has foreground-service importance; it is not a complete inventory of every service component.
+`activeTask` is a UID-level hook flag, including shared-UID semantics. Cached processes need not be executing or consuming CPU.
+`systemProcessCount` counts the API's returned process entries, not displayed apps. Apps with no known package membership are omitted.
+Timestamps use device elapsed realtime, not Unix time. Snapshots are inherently point-in-time.
+
+Icons load only for visible UI items, with three concurrent requests and a 64-image LRU cache (128 × 128 pixels each).
+The UI stops launching new running polls when paused or on another page; an in-flight socket call remains bounded by its existing timeout.
+Failed polls retain the previous snapshot with an explicit warning, rather than displaying an empty running list.

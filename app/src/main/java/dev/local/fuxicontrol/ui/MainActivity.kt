@@ -18,16 +18,22 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import dev.local.fuxicontrol.BuildConfig
 import dev.local.fuxicontrol.R
+import dev.local.fuxicontrol.core.AppSearch
 import dev.local.fuxicontrol.core.Policy
 import dev.local.fuxicontrol.service.Wire
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -82,10 +88,12 @@ private fun Entry(
     subtitle: String,
     icon: Int = R.drawable.ic_chevron_right,
     enabled: Boolean = true,
+    leading: (@Composable () -> Unit)? = null,
     action: () -> Unit,
 ) {
     ListItem(
         headlineContent = { Text(title) },
+        leadingContent = leading,
         supportingContent = { Text(subtitle) },
         trailingContent = { Glyph(icon) },
         modifier = Modifier.clickable(enabled = enabled, onClick = action).heightIn(min = 72.dp),
@@ -109,6 +117,7 @@ private fun modeLabel(value: String) =
 private fun Controller() {
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
+    val appIcons = remember { AppIcons() }
     var page by rememberSaveable { mutableStateOf("概览") }
     var tab by rememberSaveable { mutableStateOf("概览") }
     var configText by rememberSaveable { mutableStateOf("{}") }
@@ -119,6 +128,22 @@ private fun Controller() {
     var error by remember { mutableStateOf("") }
     var conflict by remember { mutableStateOf(false) }
     var search by rememberSaveable { mutableStateOf("") }
+    var searchScope by rememberSaveable { mutableStateOf("all") }
+    var policySearch by rememberSaveable { mutableStateOf("") }
+    var policyScope by rememberSaveable { mutableStateOf("all") }
+    var running by remember { mutableStateOf<JSONObject?>(null) }
+    var runningError by remember { mutableStateOf("") }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var resumed by remember {
+        mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ ->
+            resumed = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     var filter by rememberSaveable { mutableStateOf("全部") }
     var packageName by rememberSaveable { mutableStateOf("") }
     var appLabel by rememberSaveable { mutableStateOf("") }
@@ -166,7 +191,7 @@ private fun Controller() {
                         Triple(
                             Wire.call(JSONObject().put("command", "status")),
                             Wire.call(JSONObject().put("command", "config.get")),
-                            Wire.call(JSONObject().put("command", "apps")),
+                            Wire.call(JSONObject().put("command", "apps.index")),
                         )
                     }
                 status = snapshot.first
@@ -279,7 +304,25 @@ private fun Controller() {
             error = "配置格式错误：${e.message}"
         }
     }
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(resumed, page) {
+        if (resumed && page in listOf("概览", "应用", "策略", "设置")) refresh()
+    }
+    LaunchedEffect(resumed, page) {
+        if (resumed && page in listOf("概览", "应用", "策略")) {
+            while (true) {
+                try {
+                    running =
+                        withContext(Dispatchers.IO) {
+                            Wire.call(JSONObject().put("command", "apps.running"))
+                        }
+                    runningError = ""
+                } catch (e: java.io.IOException) {
+                    runningError = e.message ?: "连接失败"
+                }
+                delay(5000)
+            }
+        }
+    }
     BackHandler(page != "概览") { navigate(if (edits) tab else "概览") }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
@@ -287,19 +330,28 @@ private fun Controller() {
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            if (page == "概览") "栖序" else if (page == "应用策略") appLabel else page,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            if (page == "概览") "当前策略与运行状态"
-                            else if (page == "应用策略") packageName else "应用与后台管理",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                    Row(
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (page == "应用策略")
+                            apps
+                                .firstOrNull { it.getString("package") == packageName }
+                                ?.let { ApplicationIcon(it, appIcons) }
+                        Column {
+                            Text(
+                                if (page == "概览") "栖序" else if (page == "应用策略") appLabel else page,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                if (page == "概览") "当前策略与运行状态"
+                                else if (page == "应用策略") packageName else "应用与后台管理",
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -427,6 +479,12 @@ private fun Controller() {
                             }
                         }
                         item {
+                            RunningSummary(running, runningError) {
+                                filter = it
+                                navigate("应用")
+                            }
+                        }
+                        item {
                             val hooks = status.optJSONObject("hooks") ?: JSONObject()
                             SectionTitle("当前状态")
                             Entry(
@@ -460,39 +518,64 @@ private fun Controller() {
                     }
                     "应用" -> {
                         item {
-                            OutlinedTextField(
+                            DiscoverySearch(
                                 search,
                                 { search = it },
-                                Modifier.fillMaxWidth(),
-                                label = { Text("搜索名称或包名") },
-                                keyboardOptions =
-                                    KeyboardOptions(
-                                        capitalization = KeyboardCapitalization.None,
-                                        autoCorrect = false,
-                                    ),
-                                leadingIcon = { Glyph(R.drawable.ic_search) },
-                                singleLine = true,
+                                searchScope,
+                                { searchScope = it },
                             )
+                            if (search.isBlank())
+                                RunningSummary(running, runningError) { filter = it }
+                            else if (runningError.isNotEmpty())
+                                Text(
+                                    "运行状态为上次快照：$runningError",
+                                    color = MaterialTheme.colorScheme.error,
+                                )
                             Row(
                                 Modifier.horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                listOf("全部", "继承默认", "有例外", "关键服务").forEach { name ->
-                                    FilterChip(
-                                        filter == name,
-                                        { filter = name },
-                                        label = { Text(name) },
-                                    )
-                                }
+                                listOf("全部", "运行中", "前台", "可见", "后台", "已缓存", "继承默认", "有例外", "关键服务")
+                                    .forEach { name ->
+                                        FilterChip(
+                                            filter == name,
+                                            { filter = name },
+                                            label = { Text(name) },
+                                        )
+                                    }
                             }
                         }
                         val overrides = config.optJSONObject("apps") ?: JSONObject()
                         val visible =
                             apps.filter { app ->
                                 val name = app.getString("package")
-                                (name.contains(search, true) ||
-                                    app.getString("label").contains(search, true)) &&
+                                AppSearch.matches(
+                                    app,
+                                    app.getJSONObject("effective"),
+                                    search,
+                                    searchScope,
+                                ) &&
                                     when (filter) {
+                                        "运行中" ->
+                                            running
+                                                ?.getJSONObject("apps")
+                                                ?.optJSONObject(name)
+                                                ?.getString("state")
+                                                ?.let { it != "cached" } == true
+                                        "前台",
+                                        "可见",
+                                        "后台",
+                                        "已缓存" ->
+                                            running
+                                                ?.getJSONObject("apps")
+                                                ?.optJSONObject(name)
+                                                ?.getString("state") ==
+                                                processLabels.entries
+                                                    .first {
+                                                        it.value ==
+                                                            if (filter == "已缓存") "缓存" else filter
+                                                    }
+                                                    .key
                                         "有例外" -> overrides.has(name)
                                         "继承默认" -> !overrides.has(name)
                                         "关键服务" -> app.getBoolean("protected")
@@ -508,7 +591,7 @@ private fun Controller() {
                         }
                         items(visible, key = { it.getString("package") }) { app ->
                             val name = app.getString("package")
-                            val p = Policy.effective(config, name, app.getBoolean("protected"))
+                            val p = app.getJSONObject("effective")
                             Entry(
                                 app.getString("label"),
                                 (if (overrides.has(name)) "逐应用例外"
@@ -516,8 +599,15 @@ private fun Controller() {
                                     " · " +
                                     (if (p.getString("autostart") == "deny") "禁自启" else "允许自启") +
                                     "\n" +
-                                    name,
+                                    name +
+                                    "\n" +
+                                    processDescription(
+                                        running?.getJSONObject("apps")?.optJSONObject(name),
+                                        running != null,
+                                    ) +
+                                    permissionEvidence(app, search, searchScope),
                                 enabled = writable,
+                                leading = { ApplicationIcon(app, appIcons) },
                             ) {
                                 packageName = name
                                 appLabel = app.getString("label")
@@ -559,30 +649,72 @@ private fun Controller() {
                                 }
                             }
                         }
-                    "策略" ->
+                    "策略" -> {
                         item {
+                            DiscoverySearch(
+                                policySearch,
+                                { policySearch = it },
+                                policyScope,
+                                { policyScope = it },
+                            )
                             SectionTitle("应用规则")
-                            Entry("默认模板", "自启动、后台、资源、网络与权限") { openEditor("默认模板") }
-                            Entry(
-                                "自动化",
-                                "${config.optJSONArray("rules")?.length() ?: 0} 条规则 · 高级编辑器",
-                            ) {
-                                openEditor("自动化")
-                            }
-                            Entry(
-                                "推送",
-                                "${config.optJSONObject("pushProxy")?.length() ?: 0} 个应用 · 高级编辑器",
-                            ) {
-                                openEditor("推送")
-                            }
-                            SectionTitle("规则优先级")
-                            Text("逐应用例外 → 关键服务保护 → 默认模板。更新应用保留例外，新装普通应用继承默认。")
+                            if (AppSearch.textMatches("默认模板 自启动 后台 资源 CPU 内存 网络 权限", policySearch))
+                                Entry("默认模板", "自启动、后台、资源、网络与权限") { openEditor("默认模板") }
+                            if (AppSearch.textMatches("自动化 规则", policySearch))
+                                Entry(
+                                    "自动化",
+                                    "${config.optJSONArray("rules")?.length() ?: 0} 条规则 · 高级编辑器",
+                                ) {
+                                    openEditor("自动化")
+                                }
+                            if (AppSearch.textMatches("推送", policySearch))
+                                Entry(
+                                    "推送",
+                                    "${config.optJSONObject("pushProxy")?.length() ?: 0} 个应用 · 高级编辑器",
+                                ) {
+                                    openEditor("推送")
+                                }
                         }
+                        if (policySearch.isNotBlank()) {
+                            val matches =
+                                apps.filter {
+                                    AppSearch.matches(
+                                        it,
+                                        it.getJSONObject("effective"),
+                                        policySearch,
+                                        policyScope,
+                                    )
+                                }
+                            item { SectionTitle("匹配应用 · ${matches.size}") }
+                            items(matches, key = { it.getString("package") }) { app ->
+                                val name = app.getString("package")
+                                Entry(
+                                    app.getString("label"),
+                                    (if (config.getJSONObject("apps").has(name)) "逐应用例外"
+                                    else "继承默认或关键服务保护") +
+                                        "\n" +
+                                        name +
+                                        permissionEvidence(app, policySearch, policyScope),
+                                    enabled = writable,
+                                    leading = { ApplicationIcon(app, appIcons) },
+                                ) {
+                                    packageName = name
+                                    appLabel = app.getString("label")
+                                    openEditor("应用策略")
+                                }
+                            }
+                            if (matches.isEmpty()) item { Text("没有匹配的应用") }
+                        } else
+                            item {
+                                SectionTitle("规则优先级")
+                                Text("逐应用例外 → 关键服务保护 → 默认模板。更新应用保留例外，新装普通应用继承默认。")
+                            }
+                    }
                     "设置" ->
                         item {
                             SectionTitle("栖序 · Qixu")
                             Text(
-                                "0.2.0 · 原生简洁\n本机策略管理，沿用 Fuxi Control 服务与 CLI。",
+                                "${BuildConfig.VERSION_NAME} · 原生简洁\n本机策略管理，沿用 Fuxi Control 服务与 CLI。",
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                             SectionTitle("诊断与高级")

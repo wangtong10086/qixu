@@ -11,8 +11,9 @@ public final class Commands {
     private final Catalog catalog;
     private final Audit audit;
     private final RuntimeEngine engine;
+    private final AppDiscovery discovery;
     public Commands(Store store,Catalog catalog,Audit audit,RuntimeEngine engine) {
-        this.store=store;this.catalog=catalog;this.audit=audit;this.engine=engine;
+        this.store=store;this.catalog=catalog;this.audit=audit;this.engine=engine;this.discovery=new AppDiscovery(catalog);
     }
     public synchronized JSONObject execute(JSONObject request) throws Exception {
         String command=request.getString("command");
@@ -25,6 +26,9 @@ public final class Commands {
                     .put("mode",config.getString("mode")).put("schema",1); }
             case "capabilities" -> { return engine.capabilities(); }
             case "apps" -> { return new JSONObject().put("apps",catalog.applications()); }
+            case "apps.index" -> { return discovery.index(config,request.optString("query",""),request.optString("scope","all")); }
+            case "app.icon" -> { return discovery.icon(request.getString("package")); }
+            case "apps.running" -> { return discovery.running(engine.activeTaskUids()); }
             case "config.get" -> { return config; }
             case "defaults.get" -> { return config.getJSONObject("defaults"); }
             case "app.get", "explain" -> {

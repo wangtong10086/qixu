@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Search application names, package IDs, declared/granted permissions and effective policy keywords from applications and policies.
+- Add Chinese permission aliases and matching permission evidence; retain the distinction between permission grants and AppOps access.
+- Visualize real app processes as foreground, visible, background or cached with process counts and UID activity markers.
+- Refresh running snapshots every five seconds while a discovery page is resumed; preserve and label stale results on connection failure.
+- Load real application icons on demand in lists, search results and application detail titles, with bounded image caching.
+- Expose read-only `apps.index`, `apps.running` and `app.icon` protocol commands, plus `search` and `running` CLI commands.
+
 ## 0.2.0
 
 - Rename the UI to 栖序 / Qixu and add adaptive and monochrome launcher icons.

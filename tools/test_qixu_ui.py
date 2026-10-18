@@ -19,7 +19,23 @@ def dump():
 
 def tap(label):
     nodes=dump()
-    n=next(n for n in nodes if n.get('package')=='dev.local.fuxicontrol' and (n.get('text')==label or n.get('content-desc')==label))
+    def find(items):
+        return next((n for n in items if n.get('package')=='dev.local.fuxicontrol' and (n.get('text')==label or n.get('content-desc')==label)),None)
+    n=find(nodes)
+    if n is None:
+        # Search/filter chip rows can overflow horizontally; use their actual bounds.
+        for row in sorted((item for item in nodes if item.get('scrollable')=='true'), key=lambda item: int(re.findall(r'\d+',item.get('bounds'))[3])-int(re.findall(r'\d+',item.get('bounds'))[1])):
+            x,y,r,b=map(int,re.findall(r'\d+',row.get('bounds')))
+            if r-x > 2*(b-y):
+                for start,end in ((r-20,x+20),(x+20,r-20)):
+                    adb('shell','input','swipe',str(start),str((y+b)//2),str(end),str((y+b)//2),'350')
+                    n=find(dump())
+                    if n is not None:break
+            else:
+                adb('shell','input','swipe',str((x+r)//2),str(b-30),str((x+r)//2),str(y+30),'350')
+                n=find(dump())
+            if n is not None:break
+    if n is None:raise AssertionError('UI control not found: '+label)
     x,y,r,b=map(int,re.findall(r'\d+',n.get('bounds')))
     adb('shell','input','tap',str((x+r)//2),str((y+b)//2))
     return dump()
@@ -35,11 +51,11 @@ before=root('/data/adb/fuxicontrol/fuxictl rpc \'{"command":"config.get"}\'')
 adb('shell','am','force-stop','dev.local.fuxicontrol')
 adb('shell','am','start','-W','-n','dev.local.fuxicontrol/.ui.MainActivity')
 check('已连接');capture('overview')
-tap('应用');check('搜索名称或包名');capture('apps')
+tap('应用');check('搜索应用、包名或权限');capture('apps')
 catalog=json.loads(root('/data/adb/fuxicontrol/fuxictl apps'))['apps']
 expected=sum(app['package'] in json.loads(before)['apps'] for app in catalog)
 tap('有例外');check(f'{expected} 个应用');tap('全部')
-tap('搜索名称或包名');adb('shell','input','text','design');adb('shell','input','keyevent','4')
+tap('搜索应用、包名或权限');adb('shell','input','text','design');adb('shell','input','keyevent','4')
 tap('Fuxi Design');check('启动与后台');capture('app-policy')
 tap('返回');tap('策略');tap('默认模板');check('默认值实时作用');capture('template')
 # Change a draft only, check unsaved navigation, and discard it.

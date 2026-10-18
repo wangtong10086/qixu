@@ -9,6 +9,8 @@ import org.json.JSONObject;
 public final class Cli {
     private static final String USAGE="""
             fuxictl status|capabilities|apps|explain PACKAGE
+            fuxictl search QUERY [all|name|declared|granted|policy]
+            fuxictl running
             fuxictl defaults show|apply FILE [--dry-run]
             fuxictl app show|inherit PACKAGE
             fuxictl app set PACKAGE FIELD VALUE
@@ -35,6 +37,8 @@ public final class Cli {
         JSONObject r=new JSONObject();
         switch(a[0]) {
             case "status","capabilities","apps","audit" -> r.put("command",a[0]);
+            case "running" -> r.put("command","apps.running");
+            case "search" -> r.put("command","apps.index").put("query",a[1]).put("scope",a.length>2?a[2]:"all");
             case "rpc" -> {return new JSONObject(a[1]);}
             case "explain" -> r.put("command","explain").put("package",a[1]);
             case "reconcile" -> r.put("command","runtime.reconcile");

@@ -38,6 +38,7 @@ public final class RuntimeEngine {
         this.store=store;this.catalog=catalog;this.audit=audit;resources=new ResourceController(store.directory);
         standby=new StandbyController(catalog,store.directory);privacy=new PrivacyController(catalog,store.directory);resident=new ResidentController();audio=new AudioActivity(catalog.context());
     }
+    public synchronized Set<Integer> activeTaskUids() {return Set.copyOf(activeTasks);}
     public synchronized JSONObject status() throws org.json.JSONException {
         return new JSONObject().put("service",true).put("hookLastSeen",hookSeen).put("hooks",new JSONObject(hooks))
                 .put("hookRevision",hookRevision).put("lastError",lastError).put("foregroundUids",new JSONArray(foreground)).put("activeTaskUids",new JSONArray(activeTasks)).put("applications",runtime.size()).put("uptimeMs",android.os.SystemClock.elapsedRealtime());

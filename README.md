@@ -6,7 +6,7 @@
 
 <img src="docs/qixu/icon.svg" alt="栖序图标" width="96" />
 
-当前为 **0.2.0 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
+当前为 **0.3.0 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
 
 ## 能力
 
@@ -16,6 +16,8 @@
 - eBPF 逐 UID 上传／下载限速与超限丢包统计，保留原 Android 网络检查路径。
 - 权限和 AppOps 模板，初始没有拒绝清单；类型化自动化、推送代理。
 - Material 3 浅色界面、版本冲突检查、影响摘要与恢复继承；自动化和推送使用高级 JSON 编辑器。
+- 名称、包名、权限与策略关键词搜索，区分声明和已授予权限；应用列表与详情显示真实图标。
+- 真实进程快照可视化，区分前台、可见、后台和缓存；可见页面每 5 秒刷新。
 - 本机 root 与 adb root CLI 完整控制；管理界面按 UID 和签名认证。
 
 限速默认关闭；硬内存限制可能终止应用。没有未经测量的省电比例，也不把启动成功当成所有业务功能正常。
@@ -40,6 +42,8 @@ python3 tools/build_native.py
 ```sh
 adb shell su -c '/data/adb/fuxicontrol/fuxictl status'
 adb shell su -c '/data/adb/fuxicontrol/fuxictl explain com.example.app'
+adb shell su -c '/data/adb/fuxicontrol/fuxictl search CAMERA granted'
+adb shell su -c '/data/adb/fuxicontrol/fuxictl running'
 ```
 
 兼容现有安装：包名仍为 `dev.local.fuxicontrol`，CLI 为 `fuxictl`，设备数据目录为 `/data/adb/fuxicontrol`。源码和构建流程公开；不提供任何私有签名密钥。自行构建与已安装版本的签名不同，不能直接覆盖升级。

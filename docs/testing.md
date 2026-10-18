@@ -23,3 +23,11 @@ Use `ANDROID_SERIAL` to select a target. Device tests are never run in CI. Keep 
 Verify both desired configuration and runtime state. When testing writes, back up first, target only disposable packages, restore in `finally`, compare contents excluding the monotonic revision, then check `lastError` and hook readiness. Don't overwrite unrelated concurrent edits to force a test to pass.
 
 The generalized first-install path no longer requires a Thanox backup. This publication pass tested clean builds and host checks; it did not reset the maintained phone to repeat a fresh service installation.
+
+
+## Discovery UI (0.3)
+
+`python3 tools/test_discovery_ui.py` is read-only: it verifies CAMERA declared/granted sets, UI search counts, real manager PID membership, list/detail/search icons and unchanged policy.
+Screenshots stay under ignored `private/discovery-acceptance/` because application inventories are personal data.
+`--preview-lifecycle` additionally starts/stops `dev.local.fuxicontrol.design`; install the disposable `design-preview` APK beforehand. The option does not install/uninstall it or change its policy.
+The running view is a process-importance snapshot, not a CPU-use measurement. Cached processes are counted separately.
