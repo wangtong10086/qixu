@@ -1,0 +1,14 @@
+.gradle/
+**/build/
+local.properties
+private/
+*.keystore
+*.jks
+__pycache__/
+.idea/
+vendor/api-102.jar
+vendor/api-classes/
+native/*.o
+app/src/main/jniLibs/
+app/src/main/assets/network.bpf.o
+vendor/*.jar
