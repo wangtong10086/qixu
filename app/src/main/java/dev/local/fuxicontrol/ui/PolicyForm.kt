@@ -51,8 +51,8 @@ internal val policyFields =
             choices = listOf("allow" to "允许", "background-deny" to "禁止后台", "deny" to "禁止全部"),
             kind = "choice",
         ),
-        Field("uploadBps", "上传速率上限", "网络", "bit/s · 0 关闭限速"),
-        Field("downloadBps", "下载速率上限", "网络", "bit/s · 0 关闭限速"),
+        Field("uploadBps", "上传速率上限", "网络", "bit/s · 0 关闭限速", kind = "rate"),
+        Field("downloadBps", "下载速率上限", "网络", "bit/s · 0 关闭限速", kind = "rate"),
         Field("burstBytes", "突发窗口", "网络", "Bytes · 65536–16777216；超限丢包"),
         Field(
             "permissions",
@@ -92,7 +92,7 @@ internal fun normalizedPolicy(draft: String): JSONObject {
     policyFields
         .filter { result.has(it.key) }
         .forEach { field ->
-            if (field.kind == "number") {
+            if (field.kind in listOf("number", "rate")) {
                 val number =
                     result.get(field.key).toString().toLongOrNull()
                         ?: throw IllegalArgumentException("${field.title}需要填写整数")
@@ -145,6 +145,11 @@ internal fun PolicyForm(
             if (group != field.group) {
                 group = field.group
                 SectionTitle(group)
+                if (group == "CPU 与内存")
+                    Text(
+                        "CPU 时间配额：当前内核不支持。优先级和调度上限只限制后台调度，不是时间硬配额。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
             }
             val overridden = value.has(field.key)
             val current = if (overridden) value.get(field.key) else effective.opt(field.key)
@@ -204,6 +209,43 @@ internal fun PolicyForm(
                         ) {
                             put(field.key, it)
                         }
+                    "rate" -> {
+                        val text = current?.toString() ?: "0"
+                        Switch(
+                            text != "0",
+                            { put(field.key, if (it) 1_000_000L else 0L) },
+                            enabled = enabled,
+                        )
+                        if (text != "0") {
+                            Choice(
+                                text,
+                                listOf(
+                                    "256000" to "256 kbit/s",
+                                    "1000000" to "1 Mbit/s",
+                                    "5000000" to "5 Mbit/s",
+                                    "10000000" to "10 Mbit/s",
+                                ),
+                                enabled,
+                            ) {
+                                put(field.key, it)
+                            }
+                            OutlinedTextField(
+                                text,
+                                { put(field.key, it) },
+                                Modifier.fillMaxWidth(),
+                                enabled = enabled,
+                                label = { Text("${field.title} · bit/s") },
+                                singleLine = true,
+                                isError = text.toLongOrNull() == null,
+                                keyboardOptions =
+                                    KeyboardOptions(keyboardType = KeyboardType.Number),
+                            )
+                        } else Text("不限速")
+                        Text(
+                            "超速丢包，允许突发窗口；共享 UID 的应用共用上限。下载限制作用于到达设备后的流量。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     "number" -> {
                         val text = current?.toString() ?: "0"
                         OutlinedTextField(

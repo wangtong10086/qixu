@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- Replace visible revision numbers with named configuration switching; create copies and retain independent edits, atomically with the active configuration.
+- Add network rate switches and presets with explicit bit/s units and drop/burst semantics.
+- Document the current kernel CPU bandwidth limitation and the prerequisites for enabling real time quotas without flashing a kernel.
+
+- Replace settings JSON dumps with capability statuses, chronological event records and per-UID network counters linked to application icons.
+- Replace raw configuration editing with configuration management and structured automation/push forms; retain CLI JSON import/export.
+- Use the actual page ancestry for toolbar and system back gestures, including nested configuration pages and unsaved-edit confirmation.
+- Keep revision-checked writes, typed rule validation and existing policy fields intact.
+
 ## 0.3.1
 
 - Remove development, design and implementation commentary from the overview, settings and editors; retain actionable guidance and errors.

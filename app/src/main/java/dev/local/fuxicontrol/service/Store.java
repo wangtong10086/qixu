@@ -20,6 +20,7 @@ public final class Store {
     }
     public synchronized JSONObject get() { return Policy.copy(policy); }
     public synchronized JSONObject replace(JSONObject next, boolean dryRun) throws Exception {
+        dev.local.fuxicontrol.core.Profiles.sync(next);
         Policy.validate(next);
         next.put("revision", policy.getLong("revision") + 1);
         if (dryRun) return next;

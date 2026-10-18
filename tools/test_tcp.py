@@ -8,12 +8,12 @@ from device import adb,root
 project=Path(__file__).resolve().parents[1]
 def rpc(value): return json.loads(root('/data/adb/fuxicontrol/fuxictl rpc '+shlex.quote(json.dumps(value))))
 original=rpc({'command':'config.get'});name='dev.local.fuxicontrol.probe'
-config=json.loads(json.dumps(original));config.update(mode='enforce',apps={},rules=[],pushProxy={})
-config['defaults'].update(autostart='allow',background='normal',cpuNice=0,uclampMax=1024,memoryHighMiB=0,memoryMaxMiB=0,permissions={},appOps={},uploadBps=0,downloadBps=0,network='allow',resident=False,wakeLocks=[],cleanupOnTaskRemoved=False)
+config=json.loads(json.dumps(original))
+if config['mode']!='enforce': raise RuntimeError('Network test requires enforce mode')
 pid=root('CLASSPATH=/data/adb/fuxicontrol/controller.apk app_process /system/bin dev.local.fuxicontrol.service.NetworkFixture >/data/adb/fuxicontrol/tcp-fixture.log 2>&1 </dev/null & echo $!').strip()
 try:
     for mode,bps in [('upload',512000),('download',2000000)]:
-        config['apps']={name:{'uploadBps':bps if mode=='upload' else 0,'downloadBps':bps if mode=='download' else 0}}
+        config['apps'][name]={'autostart':'allow','background':'normal','network':'allow','uploadBps':bps if mode=='upload' else 0,'downloadBps':bps if mode=='download' else 0,'burstBytes':65536}
         rpc({'command':'config.replace','config':config})
         uid=rpc({'command':'app.get','package':name})['effective']['uid']
         adb('shell','am','force-stop',name)

@@ -61,9 +61,9 @@ tap('返回');tap('策略');tap('默认模板');check('默认值实时作用');c
 # Change a draft only, check unsaved navigation, and discard it.
 tap('禁止');tap('允许');tap('保存更改');check('确认保存更改');check('有效策略将变化');capture('save-summary');tap('取消')
 tap('设置');check('放弃未保存');tap('放弃更改');check('诊断与高级');capture('settings')
-tap('系统能力');check('requiredVectorApi');tap('返回')
-tap('策略');tap('自动化');check('高级编辑器');tap('返回')
-tap('推送');check('高级编辑器');tap('返回')
+tap('系统能力');check('所需 Vector API');tap('返回')
+tap('策略');tap('自动化');check('添加规则');tap('返回')
+tap('推送');check('添加应用');tap('返回')
 tap('概览');check('正在执行')
 after=json.loads(root('/data/adb/fuxicontrol/fuxictl rpc \'{"command":"config.get"}\''))
 # Package/permission observer events can advance revision without changing policy.

@@ -55,6 +55,8 @@ public final class Commands {
                 if(mode.equals("enforce")) engine.requireReady(config);
                 config.put("mode",mode);
             }
+            case "profile.create" -> { dev.local.fuxicontrol.core.Profiles.create(config,request.getString("name")); }
+            case "profile.activate" -> { config=dev.local.fuxicontrol.core.Profiles.activate(config,request.getString("id")); }
             case "config.replace" -> { config=Policy.copy(request.getJSONObject("config")); }
             case "rules.get" -> { return new JSONObject().put("rules",config.getJSONArray("rules")); }
             case "rules.replace" -> { config.put("rules",request.getJSONArray("rules")); }

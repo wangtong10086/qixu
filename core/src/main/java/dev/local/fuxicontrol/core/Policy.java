@@ -53,6 +53,7 @@ public final class Policy {
         }
     }
     public static void validate(JSONObject config) {
+        Profiles.validate(config);
         if (config.getInt("schema") != 1) throw new IllegalArgumentException("Unsupported schema");
         oneOf(config.getString("mode"), "observe", "enforce", "disabled");
         validatePatch(config.getJSONObject("defaults"));

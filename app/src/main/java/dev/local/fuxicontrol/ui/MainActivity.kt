@@ -11,7 +11,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,8 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -35,7 +32,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -82,7 +78,7 @@ private fun Glyph(id: Int, description: String? = null) {
 }
 
 @Composable
-private fun Entry(
+internal fun Entry(
     title: String,
     subtitle: String,
     icon: Int = R.drawable.ic_chevron_right,
@@ -103,7 +99,7 @@ private fun Entry(
 
 private fun keys(value: JSONObject) = value.keys().asSequence().toList()
 
-private fun modeLabel(value: String) =
+internal fun modeLabel(value: String) =
     when (value) {
         "enforce" -> "正在执行"
         "observe" -> "仅观察"
@@ -150,12 +146,13 @@ private fun Controller() {
     var draft by rememberSaveable { mutableStateOf("{}") }
     var original by rememberSaveable { mutableStateOf("{}") }
     var revision by rememberSaveable { mutableStateOf(0L) }
-    var report by remember { mutableStateOf("") }
+    var report by rememberSaveable { mutableStateOf("{}") }
+    var parents by rememberSaveable { mutableStateOf(listOf<String>()) }
     var confirm by remember { mutableStateOf("") }
     var leave by remember { mutableStateOf<String?>(null) }
     var modeDialog by remember { mutableStateOf(false) }
     val config = JSONObject(configText)
-    val edits = page in listOf("应用策略", "默认模板", "自动化", "推送", "原始配置")
+    val edits = page in listOf("应用策略", "默认模板", "自动化", "推送")
     val dirty = edits && draft != original
     val writable = connected && !busy && !conflict
     fun request(command: JSONObject, result: (JSONObject) -> Unit = {}) {
@@ -210,6 +207,18 @@ private fun Controller() {
             }
         }
     }
+    fun showPage(destination: String) {
+        if (destination == page) return
+        if (destination in listOf("概览", "应用", "策略", "设置")) {
+            parents = emptyList()
+            tab = destination
+        } else if (parents.lastOrNull() == destination) {
+            parents = parents.dropLast(1)
+        } else {
+            parents = parents + page
+        }
+        page = destination
+    }
     fun openEditor(destination: String) {
         if (destination == "应用策略")
             read("config.get") {
@@ -229,7 +238,7 @@ private fun Controller() {
                                 .getBoolean("protected"),
                         )
                         .toString()
-                page = destination
+                showPage(destination)
                 conflict = false
             }
         else
@@ -245,16 +254,12 @@ private fun Controller() {
                     }
                 original = draft
                 effectiveText = if (destination == "默认模板") draft else "{}"
-                page = destination
+                showPage(destination)
                 conflict = false
             }
     }
     fun navigate(destination: String) {
-        if (dirty) leave = destination
-        else {
-            page = destination
-            if (destination in listOf("概览", "应用", "策略", "设置")) tab = destination
-        }
+        if (dirty) leave = destination else showPage(destination)
     }
     fun save(reset: Boolean = false, dryRun: Boolean = false) {
         try {
@@ -273,12 +278,10 @@ private fun Controller() {
                 }
                 else -> {
                     val next =
-                        if (page == "原始配置") JSONObject(draft)
-                        else
-                            JSONObject(configText).apply {
-                                if (page == "自动化") put("rules", JSONArray(draft))
-                                else put("pushProxy", JSONObject(draft))
-                            }
+                        JSONObject(configText).apply {
+                            if (page == "自动化") put("rules", normalizedRules(draft))
+                            else put("pushProxy", JSONObject(draft))
+                        }
                     Policy.validate(next)
                     command.put("command", "config.replace").put("config", next)
                 }
@@ -293,7 +296,7 @@ private fun Controller() {
                     original = if (reset) "{}" else draft
                     draft = original
                     confirm = ""
-                    scope.launch { snack.showSnackbar("已保存 · 配置版本 $revision") }
+                    scope.launch { snack.showSnackbar("已保存") }
                     if (page == "应用策略") openEditor(page) else refresh()
                 }
             }
@@ -303,11 +306,9 @@ private fun Controller() {
             error = "配置格式错误：${e.message}"
         }
     }
+    LaunchedEffect(resumed, page) { if (resumed) refresh() }
     LaunchedEffect(resumed, page) {
-        if (resumed && page in listOf("概览", "应用", "策略", "设置")) refresh()
-    }
-    LaunchedEffect(resumed, page) {
-        if (resumed && page in listOf("概览", "应用", "策略")) {
+        if (resumed && page in listOf("概览", "应用", "应用例外", "策略")) {
             while (true) {
                 try {
                     running =
@@ -322,7 +323,7 @@ private fun Controller() {
             }
         }
     }
-    BackHandler(page != "概览") { navigate(if (edits) tab else "概览") }
+    BackHandler(page != "概览") { navigate(parentDestination(page, tab, parents)) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         snackbarHost = { SnackbarHost(snack) },
@@ -355,12 +356,25 @@ private fun Controller() {
                 },
                 navigationIcon = {
                     if (page != tab)
-                        IconButton(onClick = { navigate(tab) }) {
+                        IconButton(onClick = { navigate(parentDestination(page, tab, parents)) }) {
                             Glyph(R.drawable.ic_arrow_left, "返回")
                         }
                 },
                 actions = {
-                    IconButton(enabled = !busy, onClick = { refresh() }) {
+                    IconButton(
+                        enabled = !busy,
+                        onClick = {
+                            val command =
+                                when (page) {
+                                    "系统能力" -> "capabilities"
+                                    "最近事件" -> "audit"
+                                    "网络统计" -> "network.stats"
+                                    else -> null
+                                }
+                            if (command != null) read(command) { report = it.toString() }
+                            else refresh()
+                        },
+                    ) {
                         Glyph(R.drawable.ic_activity, "刷新连接")
                     }
                 },
@@ -394,7 +408,14 @@ private fun Controller() {
                                 onClick = {
                                     val issue =
                                         if (page in listOf("应用策略", "默认模板")) policyError(draft)
-                                        else null
+                                        else if (page == "自动化") {
+                                            try {
+                                                normalizedRules(draft)
+                                                null
+                                            } catch (e: IllegalArgumentException) {
+                                                e.message
+                                            }
+                                        } else null
                                     if (issue != null) error = "输入无效：$issue" else confirm = "save"
                                 },
                             ) {
@@ -464,7 +485,7 @@ private fun Controller() {
                                         style = MaterialTheme.typography.headlineSmall,
                                     )
                                     Text(
-                                        if (connected) "已连接 · 配置版本 ${status.optLong("revision")}"
+                                        if (connected) "已连接 · ${dev.local.fuxicontrol.core.Profiles.name(config)}"
                                         else "连接后可查看和修改策略",
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
@@ -473,6 +494,9 @@ private fun Controller() {
                                         onClick = { modeDialog = true },
                                     ) {
                                         Text("切换策略模式")
+                                    }
+                                    OutlinedButton(enabled = writable, onClick = { navigate("配置方案") }) {
+                                        Text("切换配置方案")
                                     }
                                 }
                             }
@@ -493,7 +517,7 @@ private fun Controller() {
                             ) {
                                 read("capabilities") {
                                     report = it.toString(2)
-                                    page = "诊断"
+                                    showPage("系统能力")
                                 }
                             }
                             Entry(
@@ -510,7 +534,8 @@ private fun Controller() {
                                 )
                         }
                     }
-                    "应用" -> {
+                    "应用",
+                    "应用例外" -> {
                         item {
                             DiscoverySearch(
                                 search,
@@ -518,26 +543,37 @@ private fun Controller() {
                                 searchScope,
                                 { searchScope = it },
                             )
-                            if (search.isBlank())
+                            if (page == "应用" && search.isBlank())
                                 RunningSummary(running, runningError) { filter = it }
                             else if (runningError.isNotEmpty())
                                 Text(
                                     "运行状态为上次快照：$runningError",
                                     color = MaterialTheme.colorScheme.error,
                                 )
-                            Row(
-                                Modifier.horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                listOf("全部", "运行中", "前台", "可见", "后台", "已缓存", "继承默认", "有例外", "关键服务")
-                                    .forEach { name ->
-                                        FilterChip(
-                                            filter == name,
-                                            { filter = name },
-                                            label = { Text(name) },
+                            if (page == "应用")
+                                Row(
+                                    Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    listOf(
+                                            "全部",
+                                            "运行中",
+                                            "前台",
+                                            "可见",
+                                            "后台",
+                                            "已缓存",
+                                            "继承默认",
+                                            "有例外",
+                                            "关键服务",
                                         )
-                                    }
-                            }
+                                        .forEach { name ->
+                                            FilterChip(
+                                                filter == name,
+                                                { filter = name },
+                                                label = { Text(name) },
+                                            )
+                                        }
+                                }
                         }
                         val overrides = config.optJSONObject("apps") ?: JSONObject()
                         val visible =
@@ -549,7 +585,7 @@ private fun Controller() {
                                     search,
                                     searchScope,
                                 ) &&
-                                    when (filter) {
+                                    when (if (page == "应用例外") "有例外" else filter) {
                                         "运行中" ->
                                             running
                                                 ?.getJSONObject("apps")
@@ -710,41 +746,109 @@ private fun Controller() {
                                     "网络统计" to "network.stats",
                                 )
                                 .forEach { (label, cmd) ->
-                                    Entry(label, "读取服务当前数据", enabled = !busy) {
+                                    Entry(
+                                        label,
+                                        when (cmd) {
+                                            "capabilities" -> "资源控制与功能状态"
+                                            "audit" -> "近期策略执行记录"
+                                            else -> "上传、下载与丢包"
+                                        },
+                                        enabled = !busy,
+                                    ) {
                                         read(cmd) {
                                             report = it.toString(2)
-                                            page = "诊断"
+                                            showPage(label)
                                         }
                                     }
                                 }
-                            Entry("CLI", "root 命令与配置版本校验") { page = "CLI" }
-                            Entry("原始配置", "完整 JSON · 保存前校验版本") { openEditor("原始配置") }
-                            Entry("开源许可", "Lucide 图标 · ISC") { page = "开源许可" }
+                            Entry("CLI", "命令参考") { showPage("CLI") }
+                            Entry("配置管理", "默认模板、应用例外、自动化与推送", enabled = !busy) {
+                                read("config.get") {
+                                    configText = it.toString()
+                                    showPage("配置管理")
+                                }
+                            }
+                            Entry("开源许可", "Lucide 图标 · ISC") { showPage("开源许可") }
                         }
                     "自动化",
-                    "推送",
-                    "原始配置" ->
+                    "推送" ->
                         item {
-                            SectionTitle("高级编辑器")
-                            OutlinedTextField(
-                                draft,
-                                { draft = it },
-                                Modifier.fillMaxWidth().heightIn(min = 360.dp),
+                            RuleForms(draft, page == "推送", apps, appIcons, writable) { draft = it }
+                        }
+                    "配置方案" -> item {
+                        ProfileView(config, writable) { command ->
+                            request(command.put("expectedRevision", config.getLong("revision"))) {
+                                configText = it.getJSONObject("config").toString()
+                                refresh()
+                            }
+                        }
+                    }
+                    "配置管理" ->
+                        item {
+                            Entry("配置方案", dev.local.fuxicontrol.core.Profiles.name(config), enabled = writable) { navigate("配置方案") }
+                            SectionTitle("运行模式")
+                            Entry(
+                                modeLabel(config.getString("mode")),
+                                "选择执行、观察或停用",
                                 enabled = writable,
-                                label = { Text("JSON 配置") },
-                                keyboardOptions =
-                                    KeyboardOptions(
-                                        capitalization = KeyboardCapitalization.None,
-                                        autoCorrect = false,
-                                        keyboardType = KeyboardType.Ascii,
-                                    ),
-                            )
+                            ) {
+                                modeDialog = true
+                            }
+                            SectionTitle("配置项目")
+                            Entry("默认模板", "修改普通应用继承的默认值", enabled = writable) { openEditor("默认模板") }
+                            Entry(
+                                "应用例外",
+                                "${config.getJSONObject("apps").length()} 个应用",
+                                enabled = writable,
+                            ) {
+                                search = ""
+                                showPage("应用例外")
+                            }
+                            Entry(
+                                "自动化",
+                                "${config.getJSONArray("rules").length()} 条规则",
+                                enabled = writable,
+                            ) {
+                                openEditor("自动化")
+                            }
+                            Entry(
+                                "推送",
+                                "${config.optJSONObject("pushProxy")?.length() ?: 0} 个应用",
+                                enabled = writable,
+                            ) {
+                                openEditor("推送")
+                            }
                         }
-                    "诊断" ->
+                    "系统能力" -> item { CapabilityView(JSONObject(report)) }
+                    "最近事件" -> {
+                        val records = JSONObject(report).getJSONArray("records")
+                        item { SectionTitle("最近 ${records.length()} 条事件") }
+                        if (records.length() == 0) item { Text("暂无事件") }
+                        items(
+                            (0 until records.length()).reversed().map { records.getJSONObject(it) }
+                        ) { record ->
+                            AuditRecordView(record, apps, appIcons)
+                        }
+                    }
+                    "网络统计" -> {
+                        val data = JSONObject(report)
                         item {
-                            SectionTitle("服务原始结果")
-                            Text(report, style = MaterialTheme.typography.bodySmall)
+                            SectionTitle("受控流量")
+                            Text(if (data.getBoolean("loaded")) "限速程序已加载" else "限速程序未加载，暂无计数")
                         }
+                        if (data.getBoolean("loaded")) {
+                            val counters = data.getJSONArray("counters")
+                            if (counters.length() == 0)
+                                item { Text("暂无受控流量记录", Modifier.padding(vertical = 16.dp)) }
+                            items(
+                                (0 until counters.length())
+                                    .map { counters.getJSONObject(it) }
+                                    .sortedBy { it.getInt("uid") }
+                            ) { counter ->
+                                NetworkCounterView(counter, apps, appIcons)
+                            }
+                        }
+                    }
                     "CLI" ->
                         item {
                             SectionTitle("本机或 adb root")
@@ -773,8 +877,7 @@ private fun Controller() {
                 TextButton(
                     onClick = {
                         draft = original
-                        page = leave!!
-                        if (page in listOf("概览", "应用", "策略", "设置")) tab = page
+                        showPage(leave!!)
                         leave = null
                         conflict = false
                         error = ""

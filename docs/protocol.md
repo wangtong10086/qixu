@@ -121,3 +121,14 @@ Timestamps use device elapsed realtime, not Unix time. Snapshots are inherently 
 Icons load only for visible UI items, with three concurrent requests and a 64-image LRU cache (128 × 128 pixels each).
 The UI stops launching new running polls when paused or on another page; an in-flight socket call remains bounded by its existing timeout.
 Failed polls retain the previous snapshot with an explicit warning, rather than displaying an empty running list.
+
+### Named configuration profiles
+
+`profile.create` takes `name`, duplicates the current configuration and activates the copy.
+`profile.activate` takes `id`; obtain IDs from `config.get.profiles`. Supply `expectedRevision`
+for both commands. `dryRun` validates without persisting. Profiles include mode, defaults,
+application overrides, rules and push settings. Normal writes update the active profile.
+Profile snapshots and the active policy share one atomic `policy.json` transaction; internal
+revision checks remain in use even though the UI no longer displays revision numbers.
+Inactive profiles are validated when imported; activation also performs runtime preflight.
+The existing `config.get` / `config.replace` commands support full backup and restore.

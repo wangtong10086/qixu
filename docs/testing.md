@@ -31,3 +31,23 @@ The generalized first-install path no longer requires a Thanox backup. This publ
 Screenshots stay under ignored `private/discovery-acceptance/` because application inventories are personal data.
 `--preview-lifecycle` additionally starts/stops `dev.local.fuxicontrol.design`; install the disposable `design-preview` APK beforehand. The option does not install/uninstall it or change its policy.
 The running view is a process-importance snapshot, not a CPU-use measurement. Cached processes are counted separately.
+
+## Settings and back gestures (0.4)
+
+`python3 tools/test_settings_ui.py` requires an unlocked, gesture-navigation device with the manager foreground and no concurrent phone use. It opens settings sections, checks that raw JSON is absent, performs actual swipes from both screen edges, verifies nested parent destinations, and discards default-template, automation and push drafts. It compares all policy contents before/after and stores private captures under `private/settings-acceptance/`. It does not save policy changes or install a fixture app.
+
+Host tests cover parent destination selection, rule delay normalization/rejection and traffic units. Visual diagnostics do not establish that every hook works on other ROMs, and network counters cover controlled traffic rather than all device traffic.
+
+Named-profile validation: host tests cover independent edits, duplicate names and inactive-profile
+validation. Device acceptance covers creating a copy, switching back, dry-run writes and rejecting
+an outdated revision. Network probes now retain ordinary application policies and change only the
+throwaway probe UID; both UDP and TCP tests restore the original configuration in `finally`.
+CPU quota testing is not reported as passed: this kernel lacks CFS bandwidth support; see
+[cpu-quota.md](cpu-quota.md).
+
+0.4.0 device acceptance: UDP upload 512 kbit/s and IPv6 download 2 Mbit/s met the
+wire-byte ceiling including the configured 64 KiB burst, with nonzero drop counters.
+TCP upload measured 448,920 bit/s and download 1,996,296 bit/s at the same ceilings.
+Both suites restored the pre-test policy; the probe was uninstalled. Profile navigation
+returned to the correct overview/settings parent on right/left edge gestures. All 16
+system hooks were ready in enforce mode with no service error after installation.
