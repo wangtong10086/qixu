@@ -11,11 +11,14 @@ import java.util.Set;
 public final class ResourceController {
     private final Path journalFile;
     private final JSONObject journal;
+    private final String bootId;
     public ResourceController(Path root) throws Exception {
         journalFile=root.resolve("resources.json");
-        journal=Files.exists(journalFile)?new JSONObject(Text.read(journalFile)):new JSONObject();
+        bootId=Text.read(Path.of("/proc/sys/kernel/random/boot_id")).trim();
+        JSONObject saved=Files.exists(journalFile)?new JSONObject(Text.read(journalFile)):new JSONObject();
+        journal=dev.local.fuxicontrol.core.ResourceJournal.entries(saved,bootId);
     }
-    private void persist() throws Exception {Store.atomic(journalFile,journal.toString(2));}
+    private void persist() throws Exception {Store.atomic(journalFile,new JSONObject().put("bootId",bootId).put("entries",journal).toString());}
     public synchronized void memory(int uid,long highMiB,long maxMiB) throws Exception {
         Path group=Path.of("/sys/fs/cgroup/apps/uid_"+uid);
         if(!Files.isDirectory(group)) return; // Android removes empty UID groups.

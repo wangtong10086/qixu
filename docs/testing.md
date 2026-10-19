@@ -51,3 +51,9 @@ TCP upload measured 448,920 bit/s and download 1,996,296 bit/s at the same ceili
 Both suites restored the pre-test policy; the probe was uninstalled. Profile navigation
 returned to the correct overview/settings parent on right/left edge gestures. All 16
 system hooks were ready in enforce mode with no service error after installation.
+
+For local-service recovery acceptance on a USB-connected test phone, run
+`python3 tools/test_service.py`. It temporarily turns off Wi-Fi and mobile data,
+checks RPC while offline, kills only the controller daemon to test recovery, verifies
+explicit stop remains stopped, restores the previous radio switches, and compares the
+policy before/after. Do not run while the phone is needed for network activity.

@@ -42,6 +42,7 @@ adb("push", str(temp), "/data/local/tmp/fuxictl")
 root("cp /data/local/tmp/fuxictl /data/adb/fuxicontrol/fuxictl; chmod 0700 /data/adb/fuxicontrol/fuxictl; rm /data/local/tmp/fuxictl")
 for source,target,mode in [
     (project/"tools/start.sh","start.sh","0700"),
+    (project/"tools/supervise.sh","supervise.sh","0700"),
     (project/"tools/stop.sh","stop.sh","0700"),
     (project/"tools/recover.sh","recover.sh","0700"),
     (project/"tools/network-start.sh","network-start.sh","0700"),

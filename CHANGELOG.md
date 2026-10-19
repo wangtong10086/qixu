@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- Flush atomic state files and parent directory metadata before reporting persistence success.
+- Scope resource restoration records to the current boot; preserve the existing journal format on upgrade.
+- Supervise the local root daemon and restart it after unexpected exit; explicit stop/recovery suppresses restart.
+- Clarify that management uses a local Unix socket, remove the offline-network icon and refresh disconnected UI connections while resumed.
+
 ## 0.4.0
 
 - Replace visible revision numbers with named configuration switching; create copies and retain independent edits, atomically with the active configuration.

@@ -36,8 +36,14 @@ public final class Store {
     }
     public static void atomic(Path file, String content) throws IOException {
         Path temp = file.resolveSibling(file.getFileName() + ".new");
-        Text.write(temp, content);
+        try (var output = new java.io.FileOutputStream(temp.toFile())) {
+            output.write(content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            output.getFD().sync();
+        }
         Files.setPosixFilePermissions(temp, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
         Files.move(temp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        try (var directory = java.nio.channels.FileChannel.open(file.getParent(), java.nio.file.StandardOpenOption.READ)) {
+            directory.force(true);
+        }
     }
 }

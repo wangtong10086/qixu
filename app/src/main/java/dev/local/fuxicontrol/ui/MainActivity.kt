@@ -307,6 +307,14 @@ private fun Controller() {
         }
     }
     LaunchedEffect(resumed, page) { if (resumed) refresh() }
+    LaunchedEffect(resumed, connected) {
+        if (resumed && !connected) {
+            while (true) {
+                delay(5000)
+                if (!busy) refresh()
+            }
+        }
+    }
     LaunchedEffect(resumed, page) {
         if (resumed && page in listOf("概览", "应用", "应用例外", "策略")) {
             while (true) {
@@ -316,8 +324,11 @@ private fun Controller() {
                             Wire.call(JSONObject().put("command", "apps.running"))
                         }
                     runningError = ""
+                } catch (e: Wire.CommandException) {
+                    runningError = e.message ?: "服务拒绝操作"
                 } catch (e: java.io.IOException) {
-                    runningError = e.message ?: "连接失败"
+                    connected = false
+                    runningError = e.message ?: "本地服务连接失败"
                 }
                 delay(5000)
             }
@@ -477,16 +488,16 @@ private fun Controller() {
                                 ) {
                                     Glyph(
                                         if (connected) R.drawable.ic_shield_check
-                                        else R.drawable.ic_wifi_off
+                                        else R.drawable.ic_activity
                                     )
                                     Text(
                                         if (connected) modeLabel(status.optString("mode"))
-                                        else "服务未连接",
+                                        else "本地服务未连接",
                                         style = MaterialTheme.typography.headlineSmall,
                                     )
                                     Text(
                                         if (connected) "已连接 · ${dev.local.fuxicontrol.core.Profiles.name(config)}"
-                                        else "连接后可查看和修改策略",
+                                        else "请检查本地管理服务；无需互联网连接",
                                         style = MaterialTheme.typography.bodyMedium,
                                     )
                                     OutlinedButton(
