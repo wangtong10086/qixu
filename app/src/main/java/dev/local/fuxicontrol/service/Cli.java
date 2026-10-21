@@ -11,6 +11,9 @@ public final class Cli {
             fuxictl status|capabilities|apps|explain PACKAGE
             fuxictl search QUERY [all|name|declared|granted|policy]
             fuxictl running
+            fuxictl services PACKAGE
+            fuxictl service block|restore|stop PACKAGE CLASS
+            fuxictl ads status | enable PACKAGE | disable PACKAGE | retry PACKAGE [--dry-run]
             fuxictl defaults show|apply FILE [--dry-run]
             fuxictl app show|inherit PACKAGE
             fuxictl app set PACKAGE FIELD VALUE
@@ -37,7 +40,21 @@ public final class Cli {
         JSONObject r=new JSONObject();
         switch(a[0]) {
             case "status","capabilities","apps","audit" -> r.put("command",a[0]);
+            case "ads" -> {
+                if(a[1].equals("status")) r.put("command","ads.status");
+                else if(a[1].equals("retry")) r.put("command","ads.retry").put("package",a[2]);
+                else {
+                    dev.local.fuxicontrol.core.Policy.oneOf(a[1],"enable","disable");
+                    r.put("command","app.patch").put("package",a[2]).put("patch",new JSONObject().put("blockSplashAds",a[1].equals("enable")));
+                }
+            }
             case "running" -> r.put("command","apps.running");
+            case "services" -> r.put("command","services.list").put("package",a[1]);
+            case "service" -> {
+                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"block","restore","stop");
+                r.put("command",a[1].equals("stop")?"service.stop":"service.policy").put("package",a[2]).put("class",a[3]);
+                if(!a[1].equals("stop")) r.put("mode",a[1].equals("block")?"block":"system");
+            }
             case "search" -> r.put("command","apps.index").put("query",a[1]).put("scope",a.length>2?a[2]:"all");
             case "rpc" -> {return new JSONObject(a[1]);}
             case "explain" -> r.put("command","explain").put("package",a[1]);
@@ -56,13 +73,13 @@ public final class Cli {
                     case "inherit" -> r.put("command","app.inherit");
                     case "set" -> {
                         Object value=switch(a[3]) {
-                            case "cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","burstBytes" -> Long.parseLong(a[4]);
-                            case "protected","cleanupOnTaskRemoved","resident" -> {
+                            case "screenOffDelaySeconds","cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","burstBytes" -> Long.parseLong(a[4]);
+                            case "blockSplashAds","protected","cleanupOnTaskRemoved","resident" -> {
                                 if(!a[4].equals("true")&&!a[4].equals("false")) throw new IllegalArgumentException("Expected true or false");
                                 yield Boolean.parseBoolean(a[4]);
                             }
                             case "uploadBps","downloadBps" -> rate(a[4]);
-                            case "permissions","appOps" -> new JSONObject(a[4]);
+                            case "services","permissions","appOps" -> new JSONObject(a[4]);
                             case "wakeLocks" -> new JSONArray(a[4]);
                             default -> a[4];
                         };

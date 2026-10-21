@@ -57,3 +57,13 @@ For local-service recovery acceptance on a USB-connected test phone, run
 checks RPC while offline, kills only the controller daemon to test recovery, verifies
 explicit stop remains stopped, restores the previous radio switches, and compares the
 policy before/after. Do not run while the phone is needed for network activity.
+
+
+## Splash and background management (0.5)
+
+- `test_splash.py --package com.zhihu.android|com.taobao.taobao|tv.danmaku.bili` requires an already enabled, compatible adapter and an idle unlocked device. It starts/stops only the selected target, compares enabled/disabled interception, and restores the ad switch in `finally`. A run without a real new hit is not reported as successful blocking.
+- `test_splash_ui.py --app-label 知乎|淘宝|哔哩哔哩` checks the status page, icons and detail navigation. It launches the manager; captures remain private.
+- `test_splash_health.py` intentionally crashes a disposable probe twice. Build app release/probe debug first, set `JAVA_HOME` to JDK 17 and configure `sdk.dir` in `local.properties`. It validates production exit-history processing in an isolated store, not the production socket end to end. This device test has **not yet completed**; unit coverage is separate.
+- `test_background_services.py`, `test_service_stop.py`, `test_screen_cleanup.py`, and `test_cached_cleanup.py` change only disposable probe behavior and restore its policy. Screen tests may lock the device. `test_background_ui.py` checks component-list navigation.
+
+See [splash acceptance](splash-ads.md) and [background acceptance](background-management.md) for exact evidence and limitations. Never run all device scripts as an unattended suite.

@@ -22,7 +22,9 @@ public final class RootDaemon {
         Store store=new Store(root);
         Audit audit=new Audit(root);
         RuntimeEngine engine=new RuntimeEngine(store,catalog,audit);
-        Commands commands=new Commands(store,catalog,audit,engine);
+        SplashChannel splash=new SplashChannel(store,catalog.context());
+        splash.start();
+        Commands commands=new Commands(store,catalog,audit,engine,splash);
         String signer=Text.read(root.resolve("manager.sha256")).trim();
         engine.reconcile();
         var pool=Executors.newCachedThreadPool();

@@ -10,8 +10,8 @@ android {
         applicationId = "dev.local.fuxicontrol"
         minSdk = 36
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.4.1"
+        versionCode = 10
+        versionName = "0.5.0-alpha4"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }

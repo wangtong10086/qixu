@@ -32,6 +32,14 @@ public final class ModuleEntry extends XposedModule {
     private volatile PushProxy pushProxy;
     private final Object connectionLock=new Object();
     private boolean packageObserver;
+    private android.os.PowerManager screenPower;
+
+    @Override public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
+        String name=param.getPackageName();
+        if(param.isFirstPackage() && name.equals(android.app.Application.getProcessName())
+                && dev.local.fuxicontrol.core.SplashTargets.find(name)!=null)
+            new SplashHooks(this,name,param.getClassLoader()).start();
+    }
 
     @Override public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
         ClassLoader loader=param.getClassLoader();
@@ -275,7 +283,7 @@ public final class ModuleEntry extends XposedModule {
                     synchronized(connectionLock) {connectionLock.notifyAll();}
                     synchronized(stateLock) {
                         enqueue(new JSONObject().put("command","event").put("type","hook-ready").put("hooks",new JSONObject(installed))
-                            .put("revision",snapshot.getLong("revision")).put("owners",ownerSnapshot()).put("foreground",new JSONArray(foreground)).put("activeTasks",new JSONArray(new java.util.HashSet<>(foregroundServices.values()))));
+                            .put("interactive",screenPower.isInteractive()).put("revision",snapshot.getLong("revision")).put("owners",ownerSnapshot()).put("foreground",new JSONArray(foreground)).put("activeTasks",new JSONArray(new java.util.HashSet<>(foregroundServices.values()))));
                     }
                 }
                 connected=false;
@@ -291,6 +299,16 @@ public final class ModuleEntry extends XposedModule {
             Class<?> thread=Class.forName("android.app.ActivityThread");
             Object current=thread.getMethod("currentActivityThread").invoke(null);
             android.content.Context context=(android.content.Context)thread.getMethod("getSystemContext").invoke(current);
+            screenPower=context.getSystemService(android.os.PowerManager.class);
+            var screenFilter=new android.content.IntentFilter(Intent.ACTION_SCREEN_ON);
+            screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
+            context.registerReceiver(new android.content.BroadcastReceiver() {
+                @Override public void onReceive(android.content.Context ctx,Intent intent) {
+                    try {enqueue(emit("screen-state","",-1).put("interactive",screenPower.isInteractive()));}
+                    catch(org.json.JSONException invalid) {throw new IllegalStateException(invalid);}
+                }
+            },screenFilter,android.content.Context.RECEIVER_EXPORTED);
+            installed.put("screen-state",true);
             android.content.BroadcastReceiver observer=new android.content.BroadcastReceiver() {
                 @Override public void onReceive(android.content.Context ctx,Intent intent) {
                     try {enqueue(emit("package-changed","",intent.getIntExtra(Intent.EXTRA_UID,-1)));}

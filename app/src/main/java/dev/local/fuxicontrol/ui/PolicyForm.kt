@@ -37,8 +37,12 @@ internal val policyFields =
             choices = listOf("normal" to "正常", "balanced" to "平衡", "restricted" to "严格"),
             kind = "choice",
         ),
+        Field("blockSplashAds", "屏蔽开屏广告", "启动与后台", "仅作用于已适配版本；广告状态页可查看是否加载。", kind = "bool"),
         Field("resident", "保持常驻", "启动与后台", kind = "bool"),
         Field("cleanupOnTaskRemoved", "划走任务后清理", "启动与后台", kind = "bool"),
+        Field("screenOffCleanup", "息屏清理", "启动与后台", "亮屏取消等待；音乐、前台服务、常驻和关键服务受保护。强停会中断后台任务并可能延迟消息。",
+            choices = listOf("off" to "关闭", "cached" to "回收缓存", "force-stop" to "强制停止"), kind = "choice"),
+        Field("screenOffDelaySeconds", "息屏后等待", "启动与后台", "秒 · 默认 60，范围 10–86400；保存策略后重新计时"),
         Field("protected", "关键服务保护", "启动与后台", "保护角色提供基础豁免，逐项例外仍优先。", kind = "bool"),
         Field("cpuNice", "后台 CPU 优先级", "CPU 与内存", "0–19，数值越大优先级越低"),
         Field("uclampMax", "CPU 调度上限", "CPU 与内存", "1–1024，1024 表示不限制；不是 CPU 百分比"),
@@ -130,6 +134,7 @@ internal fun PolicyForm(
     effective: JSONObject,
     template: Boolean,
     enabled: Boolean,
+    packageName: String? = null,
     change: (String) -> Unit,
 ) {
     val value = JSONObject(draft)
@@ -140,7 +145,8 @@ internal fun PolicyForm(
     }
     var group = ""
     policyFields
-        .filter { !template || it.key != "protected" }
+        .filter { !template || it.key !in listOf("protected", "blockSplashAds") }
+        .filter { it.key != "blockSplashAds" || dev.local.fuxicontrol.core.SplashTargets.find(packageName ?: "") != null }
         .forEach { field ->
             if (group != field.group) {
                 group = field.group
@@ -153,6 +159,7 @@ internal fun PolicyForm(
             }
             val overridden = value.has(field.key)
             val current = if (overridden) value.get(field.key) else effective.opt(field.key)
+                ?: if (field.key == "screenOffDelaySeconds") 60 else null
             Column(
                 Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -204,7 +211,7 @@ internal fun PolicyForm(
                     "choice" ->
                         Choice(
                             current?.toString() ?: field.choices.first().first,
-                            field.choices,
+                            field.choices.filter { !template || field.key != "screenOffCleanup" || it.first != "force-stop" },
                             enabled,
                         ) {
                             put(field.key, it)
@@ -293,6 +300,7 @@ internal fun Choice(
     value: String,
     options: List<Pair<String, String>>,
     enabled: Boolean = true,
+    packageName: String? = null,
     change: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }

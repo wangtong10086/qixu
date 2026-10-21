@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0-alpha4
+
+- Add per-application splash adapters for QQ Music, Zhihu, JD, Xiaohongshu, Amap, bilibili and Taobao, with local status reporting and reversible Vector scope changes.
+- Restore Zhihu 11.11.1 compatibility and replace exact-version gating with signing-identity and complete entrypoint checks.
+- Pause an installation after two eligible startup crashes or ANR exits within five minutes; preserve the policy switch and expose UI/CLI retry.
+- Add screen-off cached-process cleanup with protected-task exemptions, explicit per-app force-stop, and visual background-service management with restoration journals.
+- Document host tests, device fixtures and acceptance separately: Zhihu/Taobao behavior was manually accepted; automatic crash-suspension fault injection remains unverified on device.
+
 ## 0.4.1
 
 - Flush atomic state files and parent directory metadata before reporting persistence success.

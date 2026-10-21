@@ -12,6 +12,7 @@ public final class Recovery {
         Catalog catalog=new Catalog(AndroidContext.system());
         new StandbyController(catalog,directory).apply(new org.json.JSONObject(),false,java.util.Set.of());
         new PrivacyController(catalog,directory).apply(new org.json.JSONObject(),false);
-        System.out.println("Controller disabled; owned network, memory, scheduling and privacy settings restored.");
+        new ServiceController(catalog,directory).apply(new org.json.JSONObject(),false);
+        System.out.println("Controller disabled; owned network, memory, scheduling, privacy and service component settings restored.");
     }
 }

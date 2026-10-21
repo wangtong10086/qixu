@@ -6,12 +6,15 @@
 
 <img src="docs/qixu/icon.svg" alt="栖序图标" width="96" />
 
-当前为 **0.4.1 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
+当前为 **0.5.0-alpha4 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
 
 ## 能力
 
 - 普通应用继承可修改的默认模板；逐应用仅存例外，系统角色与关键服务有保护基线。
 - 后台自启动、广播、服务、作业与指定 WakeLock 管理；活动任务、音乐等运行状态参与豁免。
+- 息屏延时清理缓存进程、逐应用显式强停；保护关键服务、常驻、前台任务及音频。
+- 后台服务列表、组件停用与原状态恢复；新功能默认关闭。
+- 签名及入口结构校验的跨版本开屏广告适配，支持逐应用开关、异常暂停与重试，验收边界见文档。
 - nice / uclamp、cgroup 内存回收阈值与硬上限；支持恢复原设置。
 - eBPF 逐 UID 上传／下载限速与超限丢包统计，保留原 Android 网络检查路径。
 - 权限和 AppOps 模板，初始没有拒绝清单；类型化自动化、推送代理。
@@ -54,6 +57,7 @@ adb shell su -c '/data/adb/fuxicontrol/fuxictl running'
 | --- | --- |
 | [架构](docs/architecture.md) | 模块、数据流与权限边界 |
 | [策略](docs/policy.md) / [控制协议](docs/protocol.md) | 字段、继承、JSON socket 与 CLI |
+| [开屏广告](docs/splash-ads.md) / [后台管理](docs/background-management.md) | 适配范围、息屏策略、组件操作与验收边界 |
 | [示例](examples/README.md) | 合成配置与命令，不包含个人策略 |
 | [安装](docs/install.md) / [迁移](docs/migration.md) | 观察模式、升级、恢复与受限 Thanox 导入 |
 | [验证记录](docs/validation.md) / [UI](docs/qixu/README.md) | 已测平台、验证边界和界面验收 |

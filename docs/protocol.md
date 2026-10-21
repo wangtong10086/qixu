@@ -41,6 +41,11 @@ All names below are literal `command` values. `package` is an Android package na
 | `apps` | none | `{apps:[...]}` with package, UID, label, system and protected flags |
 | `apps.index` | optional `query` (default empty), `scope` (default `all`) | `{apps:[...],revision,capturedAtElapsedMs}` including requested permissions, effective policies and lastUpdateTime |
 | `apps.running` | none | `{apps:{package:{state,importance,processes,activeTask,foregroundService}},capturedAtElapsedMs,systemProcessCount}` |
+| `services.list` | `package` | `{package,revision,protected,services:[...]}`; declared and running component state |
+| `service.policy` | `package`, `class` (full name), `mode`: block / system | Mutation result; reversible component override |
+| `service.stop` | `package`, `class`, optional `dryRun`, `expectedRevision` | `{stopped,package,class}` or dry-run result; protected tasks rejected |
+| `ads.status` | none | Signing identity, cross-version entrypoint status, connections, hits and suspension |
+| `ads.retry` | `package`, optional `dryRun` | `{package,dryRun,retry:true}`; clear per-install health state without changing policy |
 | `app.icon` | `package` | `{png:base64}` with a 128 × 128 PNG loaded through PackageManager |
 | `config.get` | none | Full policy object |
 | `defaults.get` | none | Default policy fields |
@@ -132,3 +137,10 @@ Profile snapshots and the active policy share one atomic `policy.json` transacti
 revision checks remain in use even though the UI no longer displays revision numbers.
 Inactive profiles are validated when imported; activation also performs runtime preflight.
 The existing `config.get` / `config.replace` commands support full backup and restore.
+
+
+### Splash compatibility and retry
+
+`ads.status` retains its existing fields. `matched` now means accepted signing identity, not an exact version match. Installed entries add `updated`, `inspectedVersion`, `crossVersion`, `suspended`, and `suspendReason`. Actual method resolution and interception remain separate `report.state` values (`ready`, `blocked`, `unsupported`, `error`). A `healthy` channel report updates persisted health only and does not overwrite the visible last result.
+
+`ads.retry` accepts `package` and optional `dryRun`; root and the signed manager retain their normal write permissions. It clears only that installation's startup breaker and recent report. It does not change policy revision, mode, ad switch, or profile. Reopen the target app after retry. The CLI form is `fuxictl ads retry PACKAGE [--dry-run]`.

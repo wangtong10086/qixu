@@ -147,6 +147,7 @@ private fun Controller() {
     var original by rememberSaveable { mutableStateOf("{}") }
     var revision by rememberSaveable { mutableStateOf(0L) }
     var report by rememberSaveable { mutableStateOf("{}") }
+    var serviceChange by remember { mutableStateOf<Pair<String, String>?>(null) }
     var parents by rememberSaveable { mutableStateOf(listOf<String>()) }
     var confirm by remember { mutableStateOf("") }
     var leave by remember { mutableStateOf<String?>(null) }
@@ -380,6 +381,7 @@ private fun Controller() {
                                     "系统能力" -> "capabilities"
                                     "最近事件" -> "audit"
                                     "网络统计" -> "network.stats"
+                                    "开屏广告状态" -> "ads.status"
                                     else -> null
                                 }
                             if (command != null) read(command) { report = it.toString() }
@@ -684,8 +686,17 @@ private fun Controller() {
                                             .getBoolean("protected"),
                                     )
                                 } else JSONObject(effectiveText)
+                            if (page == "应用策略" && dev.local.fuxicontrol.core.SplashTargets.find(packageName) != null)
+                                Entry("开屏广告状态", "查看版本适配和最近命中", enabled = !busy) {
+                                    read("ads.status") { report = it.toString(); navigate("开屏广告状态") }
+                                }
+                            if (page == "应用策略") Entry("后台服务", "查看运行状态、停用组件或恢复", enabled = !busy) {
+                                request(JSONObject().put("command", "services.list").put("package", packageName)) {
+                                    report = it.toString(); navigate("后台服务")
+                                }
+                            }
                             key(page, packageName, revision) {
-                                PolicyForm(draft, inherited, page == "默认模板", writable) {
+                                PolicyForm(draft, inherited, page == "默认模板", writable, packageName) {
                                     draft = it
                                 }
                             }
@@ -699,6 +710,10 @@ private fun Controller() {
                                 { policyScope = it },
                             )
                             SectionTitle("应用规则")
+                            if (AppSearch.textMatches("开屏 广告 屏蔽", policySearch))
+                                Entry("开屏广告", "逐应用开关与版本适配") {
+                                    read("ads.status") { report = it.toString(); showPage("开屏广告状态") }
+                                }
                             if (AppSearch.textMatches("默认模板 自启动 后台 资源 CPU 内存 网络 权限", policySearch))
                                 Entry("默认模板", "自启动、后台、资源、网络与权限") { openEditor("默认模板") }
                             if (AppSearch.textMatches("自动化 规则", policySearch))
@@ -752,6 +767,7 @@ private fun Controller() {
                         item {
                             SectionTitle("诊断与高级")
                             listOf(
+                                    "开屏广告状态" to "ads.status",
                                     "系统能力" to "capabilities",
                                     "最近事件" to "audit",
                                     "网络统计" to "network.stats",
@@ -760,6 +776,7 @@ private fun Controller() {
                                     Entry(
                                         label,
                                         when (cmd) {
+                                            "ads.status" -> "入口检查、异常暂停与拦截记录"
                                             "capabilities" -> "资源控制与功能状态"
                                             "audit" -> "近期策略执行记录"
                                             else -> "上传、下载与丢包"
@@ -830,6 +847,27 @@ private fun Controller() {
                                 openEditor("推送")
                             }
                         }
+                    "开屏广告状态" -> item {
+                        SplashStatusView(JSONObject(report), apps, appIcons, writable, retry = { name ->
+                            request(JSONObject().put("command", "ads.retry").put("package", name)) {
+                                read("ads.status") { report = it.toString() }
+                            }
+                        }) { name ->
+                            packageName = name
+                            appLabel = apps.first { it.getString("package") == name }.getString("label")
+                            openEditor("应用策略")
+                        }
+                    }
+                    "后台服务" -> item {
+                        apps.firstOrNull { it.getString("package") == packageName }?.let {
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { ApplicationIcon(it, appIcons); Text(it.getString("label"), style = MaterialTheme.typography.titleLarge) }
+                        }
+                        ServiceListView(JSONObject(report), writable, reload = {
+                            request(JSONObject().put("command", "services.list").put("package", packageName)) {
+                                report = it.toString(); conflict = false
+                            }
+                        }) { cls, mode -> serviceChange = cls to mode }
+                    }
                     "系统能力" -> item { CapabilityView(JSONObject(report)) }
                     "最近事件" -> {
                         val records = JSONObject(report).getJSONArray("records")
@@ -878,6 +916,26 @@ private fun Controller() {
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
+    }
+    serviceChange?.let { (cls, mode) ->
+        AlertDialog(onDismissRequest = { serviceChange = null },
+            title = { Text(if (mode == "block") "停用服务组件？" else if (mode == "stop") "停止本次服务？" else "恢复组件状态？") },
+            text = { Text(cls + "\n" + if (mode == "stop") "只停止已启动的服务；仍有绑定客户端时可能继续运行。前台任务和关键服务会被拒绝。" else if (mode == "block") "可能影响应用通知、同步或下载。可在本页恢复，也会在停用策略时还原。" else "还原栖序修改前的状态；不会覆盖其他工具后来设置的不同状态。") },
+            confirmButton = { TextButton(enabled = writable, onClick = {
+                serviceChange = null
+                request(JSONObject().put("command", if (mode == "stop") "service.stop" else "service.policy")
+                    .put("package", packageName).put("class", cls).put("mode", mode)
+                    .put("expectedRevision", JSONObject(report).getLong("revision"))) { result ->
+                    if (mode != "stop") {
+                        configText = result.getJSONObject("config").toString()
+                        revision = result.getJSONObject("config").getLong("revision")
+                        draft = result.getJSONObject("config").getJSONObject("apps").getJSONObject(packageName).toString(); original = draft
+                    }
+                    request(JSONObject().put("command", "services.list").put("package", packageName)) { report = it.toString() }
+                    scope.launch { snack.showSnackbar(if (mode == "stop" && !result.getBoolean("stopped")) "服务未处于可停止状态" else "操作已完成") }
+                }
+            }) { Text("确认") } },
+            dismissButton = { TextButton(onClick = { serviceChange = null }) { Text("取消") } })
     }
     if (leave != null)
         AlertDialog(
