@@ -9,7 +9,8 @@
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
         <service android:name=".Isolated" android:isolatedProcess="true" android:exported="false" />
-        <service android:name=".NetworkService" android:exported="true" />
+        <service android:name=".NetworkService" android:exported="true" android:process=":network" />
+        <service android:name=".ResourceWorker" android:exported="false" android:process=":worker" />
         <service android:name=".LifecycleService" android:exported="true" android:foregroundServiceType="dataSync" />
         <receiver android:name=".Boot" android:exported="true"><intent-filter><action android:name="dev.local.fuxi.PROBE" /></intent-filter></receiver>
     </application>

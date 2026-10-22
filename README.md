@@ -6,7 +6,9 @@
 
 <img src="docs/qixu/icon.svg" alt="栖序图标" width="96" />
 
-当前为 **0.5.0-alpha4 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
+当前为 **0.6.0-alpha7 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
+
+> 当前版本包含整机／应用／进程资源视图、环形概览、Monet 配色、一键清理及 Binder 控制通道。CPU 时间配额需要匹配内核支持，详见 [资源管理](docs/resources.md) 与 [CPU 配额](docs/cpu-quota.md)。
 
 ## 能力
 
@@ -15,13 +17,14 @@
 - 息屏延时清理缓存进程、逐应用显式强停；保护关键服务、常驻、前台任务及音频。
 - 后台服务列表、组件停用与原状态恢复；新功能默认关闭。
 - 签名及入口结构校验的跨版本开屏广告适配，支持逐应用开关、异常暂停与重试，验收边界见文档。
-- nice / uclamp、cgroup 内存回收阈值与硬上限；支持恢复原设置。
+- nice / uclamp、按 UID 聚合的前后台 CPU 时间配额、cgroup 内存回收阈值与硬上限；支持恢复原设置。
 - eBPF 逐 UID 上传／下载限速与超限丢包统计，保留原 Android 网络检查路径。
 - 权限和 AppOps 模板，初始没有拒绝清单；类型化自动化、推送代理。
-- Material 3 浅色界面、版本冲突检查、影响摘要与恢复继承；自动化与推送使用表单，诊断和网络统计使用可视化列表。
+- Material 3 Monet 动态深浅色界面、命名配置方案、版本冲突检查、影响摘要与恢复继承；自动化与推送使用表单，诊断和网络统计使用可视化列表。
 - 名称、包名、权限与策略关键词搜索，区分声明和已授予权限；应用列表与详情显示真实图标。
 - 真实进程快照可视化，区分前台、可见、后台和缓存；可见页面每 5 秒刷新。
-- 本机 root 与 adb root CLI 完整控制；管理界面按 UID 和签名认证。
+- 本机 root 与 adb root CLI 完整控制；管理界面按 UID 和签名认证，通过本机 Binder/AIDL 与匿名管道通信。
+- 按独立规则预览和执行一键清理，执行前复核关键服务、活动任务及配置变更。
 
 限速默认关闭；硬内存限制可能终止应用。没有未经测量的省电比例，也不把启动成功当成所有业务功能正常。
 
@@ -56,7 +59,7 @@ adb shell su -c '/data/adb/fuxicontrol/fuxictl running'
 | 入口 | 内容 |
 | --- | --- |
 | [架构](docs/architecture.md) | 模块、数据流与权限边界 |
-| [策略](docs/policy.md) / [控制协议](docs/protocol.md) | 字段、继承、JSON socket 与 CLI |
+| [策略](docs/policy.md) / [控制协议](docs/protocol.md) | 字段、继承、Binder/AIDL 与 CLI |
 | [开屏广告](docs/splash-ads.md) / [后台管理](docs/background-management.md) | 适配范围、息屏策略、组件操作与验收边界 |
 | [示例](examples/README.md) | 合成配置与命令，不包含个人策略 |
 | [安装](docs/install.md) / [迁移](docs/migration.md) | 观察模式、升级、恢复与受限 Thanox 导入 |
@@ -70,3 +73,9 @@ adb shell su -c '/data/adb/fuxicontrol/fuxictl running'
 项目自有代码默认 **Apache-2.0**，详见 [LICENSE](LICENSE)。`native/network.bpf.c` 为 **GPL-2.0-only**；共享头文件为 **Apache-2.0 OR GPL-2.0-only**。Vector API、Lucide、Gradle 等第三方来源和许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 本项目独立开发，与 Thanox、Google、Xiaomi 或 Vector 上游不存在官方关联。支持范围与迁移限制以本仓库文档为准。
+
+资源升级历史与回滚边界：[CPU 配额、一键清理与 Binder 迁移](docs/offline-resource-upgrade.md)。最新实机结果见 [验证记录](docs/validation.md)。
+
+### 动态配色
+
+界面默认跟随系统壁纸色板和深浅色模式，无需单独选择主题。若系统“壁纸与样式”使用固定基础色，应用会遵循该系统色板；选择壁纸颜色后即可随壁纸取色。配色通过系统资源更新，不读取壁纸图片、不访问网络。

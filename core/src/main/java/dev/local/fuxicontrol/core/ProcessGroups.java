@@ -16,7 +16,7 @@ public final class ProcessGroups {
             for(int j=0;j<packages.length();j++) {
                 String name=packages.getString(j);
                 if(!installedUids.has(name) || !seen.add(name)) continue;
-                if(!apps.has(name)) apps.put(name,new JSONObject().put("importance",Integer.MAX_VALUE)
+                if(!apps.has(name)) apps.put(name,new JSONObject().put("uid",installedUids.getInt(name)).put("importance",Integer.MAX_VALUE)
                         .put("processes",new JSONArray()).put("activeTask",activeTaskUids.contains(installedUids.getInt(name)))
                         .put("foregroundService",false));
                 JSONObject app=apps.getJSONObject(name);

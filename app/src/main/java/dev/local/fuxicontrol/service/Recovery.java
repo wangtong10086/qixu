@@ -7,8 +7,8 @@ public final class Recovery {
         var directory=java.nio.file.Path.of("/data/adb/fuxicontrol");
         Store store=new Store(directory);
         var policy=store.get();policy.put("mode","disabled");store.replace(policy,false);
-        Native.networkClear();new NetworkController().restore();
         new ResourceController(directory).restoreAll();
+        Native.networkClear();new NetworkController().restore();
         Catalog catalog=new Catalog(AndroidContext.system());
         new StandbyController(catalog,directory).apply(new org.json.JSONObject(),false,java.util.Set.of());
         new PrivacyController(catalog,directory).apply(new org.json.JSONObject(),false);

@@ -1,6 +1,8 @@
 package dev.local.fuxicontrol.ui
 
 import android.os.Bundle
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -21,7 +23,6 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import dev.local.fuxicontrol.R
@@ -37,27 +38,8 @@ import org.json.JSONObject
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            isAppearanceLightStatusBars = true
-            isAppearanceLightNavigationBars = true
-        }
         setContent {
-            MaterialTheme(
-                colorScheme =
-                    lightColorScheme(
-                        primary = Color(0xFF6750A4),
-                        onPrimary = Color.White,
-                        primaryContainer = Color(0xFFEADDFF),
-                        onPrimaryContainer = Color(0xFF21005D),
-                        surface = Color(0xFFFFFBFE),
-                        background = Color(0xFFFFFBFE),
-                        surfaceVariant = Color(0xFFF3EDF7),
-                        outline = Color(0xFF79747E),
-                        onSurface = Color(0xFF1D1B20),
-                    )
-            ) {
-                Controller()
-            }
+            QixuTheme(window) { Controller() }
         }
     }
 }
@@ -110,6 +92,7 @@ internal fun modeLabel(value: String) =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Controller() {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
     val appIcons = remember { AppIcons() }
@@ -127,6 +110,9 @@ private fun Controller() {
     var policySearch by rememberSaveable { mutableStateOf("") }
     var policyScope by rememberSaveable { mutableStateOf("all") }
     var running by remember { mutableStateOf<JSONObject?>(null) }
+    var resourceSnapshot by remember { mutableStateOf(JSONObject()) }
+    var resourceSort by rememberSaveable {mutableStateOf("名称")}
+    var resourceSortMenu by remember {mutableStateOf(false)}
     var runningError by remember { mutableStateOf("") }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var resumed by remember {
@@ -209,6 +195,7 @@ private fun Controller() {
         }
     }
     fun showPage(destination: String) {
+        if(destination=="#close-resource-editor"){(context as android.app.Activity).finish();return}
         if (destination == page) return
         if (destination in listOf("概览", "应用", "策略", "设置")) {
             parents = emptyList()
@@ -307,6 +294,13 @@ private fun Controller() {
             error = "配置格式错误：${e.message}"
         }
     }
+    LaunchedEffect(apps.isNotEmpty()) {
+        val requested=(context as android.app.Activity).intent.getStringExtra("editPackage")
+        if(requested!=null && apps.isNotEmpty()) {
+            packageName=requested;appLabel=apps.first{it.getString("package")==requested}.getString("label")
+            context.intent.removeExtra("editPackage");context.intent.putExtra("returnToResources",true);openEditor("应用策略")
+        }
+    }
     LaunchedEffect(resumed, page) { if (resumed) refresh() }
     LaunchedEffect(resumed, connected) {
         if (resumed && !connected) {
@@ -324,6 +318,7 @@ private fun Controller() {
                         withContext(Dispatchers.IO) {
                             Wire.call(JSONObject().put("command", "apps.running"))
                         }
+                    resourceSnapshot=withContext(Dispatchers.IO){Wire.call(JSONObject().put("command","resources.snapshot"))}
                     runningError = ""
                 } catch (e: Wire.CommandException) {
                     runningError = e.message ?: "服务拒绝操作"
@@ -335,7 +330,8 @@ private fun Controller() {
             }
         }
     }
-    BackHandler(page != "概览") { navigate(parentDestination(page, tab, parents)) }
+    fun backDestination()=if(page=="应用策略" && (context as android.app.Activity).intent.getBooleanExtra("returnToResources",false)) "#close-resource-editor" else parentDestination(page,tab,parents)
+    BackHandler(page != "概览") { navigate(backDestination()) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         snackbarHost = { SnackbarHost(snack) },
@@ -368,7 +364,7 @@ private fun Controller() {
                 },
                 navigationIcon = {
                     if (page != tab)
-                        IconButton(onClick = { navigate(parentDestination(page, tab, parents)) }) {
+                        IconButton(onClick = { navigate(backDestination()) }) {
                             Glyph(R.drawable.ic_arrow_left, "返回")
                         }
                 },
@@ -515,6 +511,10 @@ private fun Controller() {
                             }
                         }
                         item {
+                            ResourceOverview {
+                                context.startActivity(Intent(context,ResourceActivity::class.java))
+                            }
+                            CleanupPanel()
                             RunningSummary(running, runningError) {
                                 filter = it
                                 navigate("应用")
@@ -556,6 +556,15 @@ private fun Controller() {
                                 searchScope,
                                 { searchScope = it },
                             )
+                            Row {
+                                TextButton(onClick={context.startActivity(Intent(context,ResourceActivity::class.java))}) {Text("资源排行与批量管理")}
+                                Box {
+                                    TextButton(onClick={resourceSortMenu=true}) {Text("排序：$resourceSort")}
+                                    DropdownMenu(expanded=resourceSortMenu,onDismissRequest={resourceSortMenu=false}) {
+                                        listOf("名称","CPU","内存","上传","下载").forEach {name->DropdownMenuItem(text={Text(name)},onClick={resourceSort=name;resourceSortMenu=false})}
+                                    }
+                                }
+                            }
                             if (page == "应用" && search.isBlank())
                                 RunningSummary(running, runningError) { filter = it }
                             else if (runningError.isNotEmpty())
@@ -625,6 +634,10 @@ private fun Controller() {
                                         else -> true
                                     }
                             }
+                        val sortedVisible=if(resourceSort=="名称")visible else visible.sortedByDescending {app->
+                            val field=mapOf("CPU" to "cpuPercent","内存" to "rssBytes","上传" to "uploadBytesPerSecond","下载" to "downloadBytesPerSecond").getValue(resourceSort)
+                            resourceSnapshot.optJSONObject("apps")?.optJSONObject(app.getString("package"))?.optDouble(field,0.0)?:0.0
+                        }
                         item {
                             Text(
                                 "${visible.size} 个应用",
@@ -632,7 +645,7 @@ private fun Controller() {
                                 style = MaterialTheme.typography.labelLarge,
                             )
                         }
-                        items(visible, key = { it.getString("package") }) { app ->
+                        items(sortedVisible, key = { it.getString("package") }) { app ->
                             val name = app.getString("package")
                             val p = app.getJSONObject("effective")
                             Entry(
@@ -648,13 +661,14 @@ private fun Controller() {
                                         running?.getJSONObject("apps")?.optJSONObject(name),
                                         running != null,
                                     ) +
+                                    "\n"+resourceDescription(resourceSnapshot.optJSONObject("apps")?.optJSONObject(name))+
                                     permissionEvidence(app, search, searchScope),
                                 enabled = writable,
                                 leading = { ApplicationIcon(app, appIcons) },
                             ) {
                                 packageName = name
                                 appLabel = app.getString("label")
-                                openEditor("应用策略")
+                                context.startActivity(Intent(context,ResourceActivity::class.java).putExtra("package",name))
                             }
                         }
                         if (visible.isEmpty())

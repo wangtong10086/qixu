@@ -8,6 +8,9 @@
 | `autostart` | `allow` / `deny`；禁止后台冷启动、接收器、服务与作业，不阻止用户打开活动 |
 | `background` | `normal` / `balanced` / `restricted`；restricted 使用 Android UID idle、待机桶和安全的缓存冻结 |
 | `cpuNice` | 0 不调整；1–19 为后台线程优先级下限，不是 CPU 百分比 |
+| `cpuQuota` | `periodUs`、`foregroundUs`、`backgroundUs`（微秒）；0 阶段额度为关闭，`allowProtected` 显式允许关键应用配额；见 [CPU 配额](cpu-quota.md) |
+| `manualCleanup` | 独立的一键清理规则，默认仅回收缓存；见 [控制协议](protocol.md#manual-cleanup-and-cpu-quota-schema-3) |
+| `processes` | 按完整进程名配置前后台资源限制与活动任务豁免；见 [资源管理](resources.md) |
 | `uclampMax` | 1–1024；调度利用率上限，不是硬 CPU 时间配额 |
 | `memoryHighMiB` | 0 不限制；非零触发 cgroup 内存回收压力 |
 | `memoryMaxMiB` | 0 不限制；硬上限，可能触发应用自身 OOM |

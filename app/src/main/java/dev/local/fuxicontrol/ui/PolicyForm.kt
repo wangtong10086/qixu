@@ -44,6 +44,8 @@ internal val policyFields =
             choices = listOf("off" to "关闭", "cached" to "回收缓存", "force-stop" to "强制停止"), kind = "choice"),
         Field("screenOffDelaySeconds", "息屏后等待", "启动与后台", "秒 · 默认 60，范围 10–86400；保存策略后重新计时"),
         Field("protected", "关键服务保护", "启动与后台", "保护角色提供基础豁免，逐项例外仍优先。", kind = "bool"),
+        Field("manualCleanup", "一键清理规则", "手动清理", kind = "cleanup"),
+        Field("cpuQuota", "CPU 时间配额", "CPU 与内存", kind = "quota"),
         Field("cpuNice", "后台 CPU 优先级", "CPU 与内存", "0–19，数值越大优先级越低"),
         Field("uclampMax", "CPU 调度上限", "CPU 与内存", "1–1024，1024 表示不限制；不是 CPU 百分比"),
         Field("memoryHighMiB", "内存回收阈值", "CPU 与内存", "MiB · 0 表示不限制"),
@@ -87,6 +89,8 @@ internal fun policyValueLabel(field: Field, value: Any?): String =
     when {
         value == null -> "继承"
         field.kind == "choice" -> field.choices.first { it.first == value.toString() }.second
+        field.kind == "quota" -> (value as JSONObject).let {"前台 ${it.optLong("foregroundUs")/1000.0} / 后台 ${it.optLong("backgroundUs")/1000.0} ms，每 ${it.optLong("periodUs")/1000.0} ms"}
+        field.kind == "cleanup" -> (value as JSONObject).let {"${it.optString("mode")} · 后台 ${it.optLong("backgroundSeconds")} 秒 · CPU ${it.optDouble("cpuPercent")}% · ${it.optLong("rssMiB")} MiB"}
         field.kind == "bool" -> if (value == true) "开启" else "关闭"
         else -> value.toString()
     }
@@ -114,6 +118,13 @@ internal fun normalizedPolicy(draft: String): JSONObject {
                     ),
                 )
         }
+    if(result.has("cpuQuota")) result.getJSONObject("cpuQuota").let {quota->
+        listOf("periodUs","foregroundUs","backgroundUs").forEach {key->quota.put(key,quota.get(key).toString().toLong())}
+    }
+    if(result.has("manualCleanup")) result.getJSONObject("manualCleanup").let {rule->
+        listOf("backgroundSeconds","rssMiB").forEach {key->rule.put(key,rule.get(key).toString().toLong())}
+        rule.put("cpuPercent",rule.get("cpuPercent").toString().toDouble())
+    }
     Policy.validatePatch(result)
     return result
 }
@@ -153,7 +164,7 @@ internal fun PolicyForm(
                 SectionTitle(group)
                 if (group == "CPU 与内存")
                     Text(
-                        "CPU 时间配额：当前内核不支持。优先级和调度上限只限制后台调度，不是时间硬配额。",
+                        "时间配额依赖内核及 UID 分组支持；优先级和调度上限独立配置。",
                         style = MaterialTheme.typography.bodySmall,
                     )
             }
@@ -197,6 +208,8 @@ internal fun PolicyForm(
                     }
                 }
                 when (field.kind) {
+                    "quota" -> CpuQuotaFields(current as? JSONObject ?: dev.local.fuxicontrol.core.CpuQuota.defaults(),enabled) {put(field.key,it)}
+                    "cleanup" -> ManualCleanupFields(current as? JSONObject ?: dev.local.fuxicontrol.core.ManualCleanup.defaults(),template,enabled) {put(field.key,it)}
                     "bool" ->
                         Row(
                             Modifier.fillMaxWidth(),

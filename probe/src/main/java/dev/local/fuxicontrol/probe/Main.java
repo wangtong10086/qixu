@@ -38,6 +38,7 @@ public class Main extends Activity {
             @Override public void onServiceDisconnected(android.content.ComponentName name) {}
         },BIND_AUTO_CREATE);
         if(getIntent().hasExtra("udp")) Datagrams.run(this,getIntent().getStringExtra("udp"),getIntent().getBooleanExtra("ipv6",false));
+        if(getIntent().getBooleanExtra("resources",false))startService(new Intent(this,ResourceWorker.class));
         if(getIntent().hasExtra("test")) startService(new Intent(this,NetworkService.class).putExtras(getIntent()));
     }
 }

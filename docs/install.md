@@ -12,7 +12,7 @@ python3 tools/install.py --apk private/releases/fuxicontrol-release.apk
 adb shell su -c '/data/adb/fuxicontrol/fuxictl status'
 ```
 
-安装工具会安装管理 APK、复制自身服务文件、记录管理签名、设置自身开机脚本并启动服务。**全新配置为 observe**；升级保留已有模式与策略。工具不会启用 Vector，也不会停用 Thanox；首次安装不要求任何 Thanox 备份。
+安装工具会安装管理 APK、复制自身服务文件、记录管理签名、设置自身开机脚本并启动服务。**全新配置为 observe**；升级保留已有模式与策略。工具保留 Vector 原有启用状态，升级时刷新已启用模块的 APK 路径；不会自动启用未启用模块，也不会停用 Thanox；首次安装不要求任何 Thanox 备份。
 
 在 Vector 管理器中启用栖序模块，作用域选择 Android 系统（system / 用户 0），然后重启。检查 `capabilities`、`status` 中的钩子与 `lastError`。确认兼容后再执行：
 
@@ -46,3 +46,5 @@ adb shell su -c 'sh /data/adb/fuxicontrol/recover.sh'
 第一条进入观察模式并撤回受管限制；第二条用于故障恢复，停止自身服务和启动脚本、关闭自身 Vector 激活并恢复受管设置。系统钩子在重启后卸载。不会停用或恢复其他模块。
 
 若曾执行特定的 Thanox 接管，另见 [迁移文档](migration.md)。`restore_thanox.sh` 和相关回调工具是既有接管环境的恢复工具，不应在新设备上直接运行。
+
+从旧控制 socket 版本升级至 Binder 版本时，必须同步更新管理 APK、root daemon 与钩子并重启，避免混用传输协议。schema 1/2 导入会备份并迁移到 schema 3，包括命名配置方案；降级应恢复安装前完整配置，不能让旧程序直接读取 schema 3。

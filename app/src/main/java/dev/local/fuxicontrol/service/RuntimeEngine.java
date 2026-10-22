@@ -30,6 +30,7 @@ public final class RuntimeEngine {
     private final NetworkController network=new NetworkController();
     private final Map<String,JSONObject> runtime=new HashMap<>();
     private final Map<Integer,Integer> owners=new HashMap<>();
+    private final Map<Integer,Long> backgroundSince=new HashMap<>();
     private final Set<Integer> foreground=new HashSet<>();
     private final Set<Integer> activeTasks=new HashSet<>();
     private final Map<String,Boolean> hooks=new HashMap<>();
@@ -45,7 +46,12 @@ public final class RuntimeEngine {
         standby=new StandbyController(catalog,store.directory);privacy=new PrivacyController(catalog,store.directory);resident=new ResidentController();audio=new AudioActivity(catalog.context());
         services=new ServiceController(catalog,store.directory);power=catalog.context().getSystemService(android.os.PowerManager.class);
         tasks.setRemoveOnCancelPolicy(true);
+        tasks.scheduleWithFixedDelay(()-> {
+            try {if(store.get().getString("mode").equals("enforce")) reconcile(true);}
+            catch(Exception failure) {android.util.Log.e("FuxiControl","Resource reconciliation failed",failure);}
+        },5,5,TimeUnit.SECONDS);
     }
+    public synchronized int ownerUid(int uid) {return owners.getOrDefault(uid,uid);}
     public synchronized Set<Integer> activeTaskUids() {return Set.copyOf(activeTasks);}
     public synchronized JSONObject status() throws org.json.JSONException {
         return new JSONObject().put("service",true).put("hookLastSeen",hookSeen).put("hooks",new JSONObject(hooks))
@@ -53,15 +59,23 @@ public final class RuntimeEngine {
                 .put("screenCleanup",new JSONObject().put("screenKnown",screenKnown).put("interactive",power.isInteractive()).put("pending",new JSONArray(pendingScreenCleanup.keySet())));
     }
     public JSONObject capabilities() throws org.json.JSONException {
-        return new JSONObject().put("androidSdk",android.os.Build.VERSION.SDK_INT).put("requiredVectorApi",102)
+        return new JSONObject().put("processCpu",true).put("resourceHistory",true).put("processMemory",Files.exists(Path.of("/sys/fs/cgroup/apps/memory.high"))).put("processNetwork",Files.exists(Path.of("/sys/fs/bpf/fuxicontrol/process_limits"))).put("androidSdk",android.os.Build.VERSION.SDK_INT).put("requiredVectorApi",102)
                 .put("memoryHigh",Files.exists(Path.of("/sys/fs/cgroup/apps/memory.high")))
                 .put("memoryMax",Files.exists(Path.of("/sys/fs/cgroup/apps/memory.max")))
-                .put("cpuBandwidthQuota",false).put("uclamp",Files.exists(Path.of("/dev/cpuctl/background/cpu.uclamp.max")))
+                .put("cpuBandwidthQuota",V1CpuQuota.supported()||Files.exists(Path.of("/sys/fs/cgroup/apps/cpu.max"))).put("cpuQuotaBackend",V1CpuQuota.supported()?"cgroup-v1-uid":"cgroup-v2-existing-uid-tree").put("uclamp",Files.exists(Path.of("/dev/cpuctl/background/cpu.uclamp.max")))
                 .put("networkLoaded",Files.exists(Path.of("/sys/fs/bpf/fuxicontrol/limits")))
                 .put("hookExecution",new JSONObject(hooks));
     }
     public synchronized JSONObject packageStatus(String name) throws org.json.JSONException {
         return runtime.containsKey(name)?runtime.get(name):new JSONObject().put("state","not-reconciled");
+    }
+    public synchronized JSONObject processState(String name,String process) throws Exception {
+        JSONObject app=catalog.snapshot(store.get()).getJSONObject("effective").getJSONObject(name);
+        int uid=app.getInt("uid");JSONObject rules=app.optJSONObject("processes");
+        JSONObject rule=rules==null?null:rules.optJSONObject(process);
+        JSONObject value=dev.local.fuxicontrol.core.ProcessPolicy.effective(app,rule==null?new JSONObject():rule,foreground.contains(uid),activeTasks.contains(uid)||audio.activeUids().contains(uid));
+        value.put("cpuQuotaSupported",Files.exists(Path.of("/sys/fs/cgroup/apps/uid_"+uid,"cpu.max")));
+        return value.put("mode",store.get().getString("mode")).put("appUploadBps",app.getLong("uploadBps")).put("appDownloadBps",app.getLong("downloadBps"));
     }
     private String missingHook(JSONObject config) throws org.json.JSONException {
         var required=new java.util.LinkedHashSet<>(java.util.List.of("startup","foreground","wakelock","push","jobs","task-removed","provider","push-broadcast","active-task","freezer","package-observer","broadcast","process-started","permissions-observer"));
@@ -81,13 +95,20 @@ public final class RuntimeEngine {
         String missing=missingHook(config);
         if(!missing.isEmpty()) throw new IllegalStateException("Required hook not ready: "+missing);
     }
-    public synchronized void reconcile() throws Exception {
+    public synchronized void reconcile() throws Exception {reconcile(false);}
+    private synchronized void reconcile(boolean resourcesOnly) throws Exception {
       try {
         JSONObject config=store.get();
         JSONObject snapshot=catalog.snapshot(config);
         boolean enforce=config.getString("mode").equals("enforce");
         JSONObject effective=snapshot.getJSONObject("effective");
-        scheduleScreenCleanup(config,effective);
+        Set<Integer> runningUids=new HashSet<>();
+        for(String name:runningPackages()) if(effective.has(name)) {
+            int uid=effective.getJSONObject(name).getInt("uid");runningUids.add(uid);
+            if(!foreground.contains(uid)) backgroundSince.putIfAbsent(uid,android.os.SystemClock.elapsedRealtime());
+        }
+        backgroundSince.keySet().removeIf(uid->!runningUids.contains(uid));
+        if(!resourcesOnly) scheduleScreenCleanup(config,effective);
         String missing=enforce?missingHook(config):"";
         if(!missing.isEmpty()) {
             // Boot and daemon restarts have no foreground snapshot until the hook reconnects.
@@ -95,31 +116,30 @@ public final class RuntimeEngine {
             lastError="Waiting for system hook: "+missing;
             return;
         }
-        if(!enforce) {resources.restoreAll();Native.networkClear();network.restore();}
+        network.ensure();
+        if(!enforce) {resources.restoreAll();Native.networkClear();}
         if(enforce) {
-            boolean needed=false;
-            for(String name:dev.local.fuxicontrol.core.Json.keys(effective)) {
-                JSONObject p=effective.getJSONObject(name);
-                needed |= p.getLong("uploadBps")>0 || p.getLong("downloadBps")>0 || !p.getString("network").equals("allow");
-            }
-            if(needed) {
-                network.ensure();
-                for(var entry:owners.entrySet()) Native.networkAlias(entry.getKey(),entry.getValue());
-            } else {Native.networkClear();network.restore();}
-            resources.scanProcesses();
+            for(var entry:owners.entrySet()) Native.networkAlias(entry.getKey(),entry.getValue());
+            resources.scanProcesses();resources.beginProcesses();
         }
         Set<Integer> playing=enforce?audio.activeUids():Set.of();
+        var processPolicies=combinedProcessRules(effective);
+        Set<Integer> quotaProtected=protectedCleanupUids(effective);
         Set<Integer> seen=new HashSet<>();
         for(String name:dev.local.fuxicontrol.core.Json.keys(effective)) {
             JSONObject p=effective.getJSONObject(name);int uid=p.getInt("uid");
+            p.put("processes",processPolicies.get(uid));
             JSONObject result=new JSONObject().put("mode",config.getString("mode")).put("uid",uid).put("configured",p);
             if(enforce && seen.add(uid)) {
                 boolean active=foreground.contains(uid)||activeTasks.contains(uid)||playing.contains(uid)||p.optBoolean("protected",false);
+                result.put("cpuQuota",resources.cpuQuota(uid,p.getJSONObject("cpuQuota"),foreground.contains(uid),
+                        activeTasks.contains(uid)||playing.contains(uid)||(quotaProtected.contains(uid)&&!p.getJSONObject("cpuQuota").optBoolean("allowProtected",false)),
+                        owners.entrySet().stream().anyMatch(entry->entry.getValue()==uid && entry.getKey()!=uid)));
                 resources.memory(uid,active?0:p.getLong("memoryHighMiB"),active?0:p.getLong("memoryMaxMiB"));
-                resources.scheduling(uid,p.getInt("cpuNice"),p.getInt("uclampMax"),!active);
+                resources.processRules(uid,p,foreground.contains(uid),activeTasks.contains(uid)||playing.contains(uid),quotaProtected.contains(uid));
                 for(var owner:owners.entrySet()) if(owner.getValue()==uid && owner.getKey()!=uid) {
                     resources.memory(owner.getKey(),active?0:p.getLong("memoryHighMiB"),active?0:p.getLong("memoryMaxMiB"));
-                    resources.scheduling(owner.getKey(),p.getInt("cpuNice"),p.getInt("uclampMax"),!active);
+                    resources.processRules(owner.getKey(),p,foreground.contains(uid),activeTasks.contains(uid)||playing.contains(uid),quotaProtected.contains(uid));
                 }
                 int deny=p.getString("network").equals("deny") || (p.getString("network").equals("background-deny")&&!active)?3:0;
                 if(p.getLong("uploadBps")>0 || p.getLong("downloadBps")>0 || deny!=0) {
@@ -130,13 +150,28 @@ public final class RuntimeEngine {
             } else result.put("applied",false).put("reason",enforce?"shared-uid":"observation-only");
             runtime.put(name,result);
         }
-        privacy.apply(effective,enforce);resident.apply(effective,enforce);services.apply(effective,enforce);
+        if(enforce) resources.finishProcesses();
+        if(!resourcesOnly) {privacy.apply(effective,enforce);resident.apply(effective,enforce);services.apply(effective,enforce);}
         Set<Integer> active=new HashSet<>(foreground);active.addAll(activeTasks);active.addAll(playing);
-        standby.apply(effective,enforce,active);
+        if(!resourcesOnly) standby.apply(effective,enforce,active);
         resources.flush();lastError="";
       } catch(Exception failure) {
         lastError=failure.getClass().getSimpleName()+": "+failure.getMessage();throw failure;
       }
+    }
+    private Map<Integer,JSONObject> combinedProcessRules(JSONObject effective) throws org.json.JSONException {
+        Map<Integer,JSONObject> combined=new HashMap<>();
+        for(String name:dev.local.fuxicontrol.core.Json.keys(effective)) {
+            JSONObject policy=effective.getJSONObject(name),rules=policy.optJSONObject("processes");
+            int uid=policy.getInt("uid");
+            JSONObject all=combined.get(uid);if(all==null){all=new JSONObject();combined.put(uid,all);}
+            if(rules!=null) for(String process:dev.local.fuxicontrol.core.Json.keys(rules)) {
+                if(all.has(process)&&!all.getJSONObject(process).toString().equals(rules.getJSONObject(process).toString()))
+                    throw new IllegalArgumentException("共享 UID 的进程规则冲突："+process);
+                all.put(process,rules.getJSONObject(process));
+            }
+        }
+        return combined;
     }
     public synchronized void preflight(JSONObject config) throws Exception {
         dev.local.fuxicontrol.core.Policy.validate(config);
@@ -145,11 +180,12 @@ public final class RuntimeEngine {
         services.validate(config,store.get());
         privacy.validate(new JSONObject().put("defaults",config.getJSONObject("defaults")));
         if(config.getString("mode").equals("enforce")) requireReady(config);
+        combinedProcessRules(effective);
         java.util.Map<Integer,String> shared=new java.util.HashMap<>();
         for(String name:dev.local.fuxicontrol.core.Json.keys(effective)) {
             JSONObject p=effective.getJSONObject(name);
             JSONObject uidPolicy=new JSONObject();
-            for(String field:new String[]{"cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network","permissions","appOps"})
+            for(String field:new String[]{"cpuQuota","manualCleanup","cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network","permissions","appOps"})
                 uidPolicy.put(field,p.get(field));
             String encoded=uidPolicy.toString(),previous=shared.putIfAbsent(p.getInt("uid"),encoded);
             if(previous!=null && !previous.equals(encoded)) throw new IllegalArgumentException("Conflicting shared UID resource policy: "+name);
@@ -199,9 +235,9 @@ public final class RuntimeEngine {
             boolean visible=event.getBoolean("active");
             boolean wasForeground=foreground.contains(uid);
             if(visible) {
-                foreground.add(uid);
+                foreground.add(uid);backgroundSince.remove(uid);
                 if(!event.optString("package").isEmpty()) pendingKills.remove(event.getString("package"));
-            } else foreground.remove(uid);
+            } else {foreground.remove(uid);if(wasForeground) backgroundSince.put(uid,android.os.SystemClock.elapsedRealtime());}
             changed=wasForeground!=visible;
             if(wasForeground && !visible && !event.optString("package").isEmpty()) runRules("foreground-left",event.getString("package"));
         } else if(type.equals("active-task")) {
@@ -286,6 +322,49 @@ public final class RuntimeEngine {
         Shell.run("am",action.equals("cached")?"kill":"force-stop","--user","0",name);
         audit.record("screen-cleanup-requested",record);
     }
+    public synchronized JSONObject manualCleanupPreview(JSONObject metrics) throws Exception {
+        JSONObject effective=catalog.snapshot(store.get()).getJSONObject("effective");
+        JSONArray rows=new JSONArray();
+        for(String name:runningPackages()) if(effective.has(name)) rows.put(manualCleanupCandidate(name,effective,metrics));
+        return new JSONObject().put("apps",rows);
+    }
+    private JSONObject manualCleanupCandidate(String name,JSONObject effective,JSONObject metrics) throws Exception {
+        JSONObject policy=effective.getJSONObject(name),rule=policy.getJSONObject("manualCleanup");
+        int uid=policy.getInt("uid");long now=android.os.SystemClock.elapsedRealtime();
+        long since=backgroundSince.computeIfAbsent(uid,key->now);
+        String reason="";
+        if(!missingHook(store.get()).isEmpty()) reason="系统状态未就绪";
+        else if(protectedCleanupUids(effective).contains(uid)) reason="关键服务或保留应用";
+        else if(foreground.contains(uid)) {reason="前台应用";backgroundSince.remove(uid);}
+        else if(activeTasks.contains(uid)||services.foregroundUids().contains(uid)||audio.activeUids().contains(uid)) reason="音乐、导航、下载或前台服务";
+        // Query AMS again as hook events can still be queued while the user switches apps.
+        var live=catalog.context().getSystemService(android.app.ActivityManager.class).getRunningAppProcesses();
+        if(live!=null) for(var process:live) if(ownerUid(process.uid)==uid && process.importance<=android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE)
+            reason="当前有可见进程或前台服务";
+        if(reason.isEmpty() && rule.getString("mode").equals("force-stop")) {
+            for(String peer:dev.local.fuxicontrol.core.Json.keys(effective)) if(!peer.equals(name) && effective.getJSONObject(peer).getInt("uid")==uid)
+                reason="共享 UID 不允许批量强制停止";
+        }
+        JSONObject apps=metrics.optJSONObject("apps"),sample=apps==null?null:apps.optJSONObject(name);
+        boolean fresh=metrics.optBoolean("available") && !metrics.isNull("ageMs") && metrics.getLong("ageMs")<=5000 && metrics.optString("error").isEmpty();
+        Double cpu=sample==null || sample.isNull("cpu30sPercent")?null:sample.getDouble("cpu30sPercent");
+        Long rss=sample==null || sample.isNull("rssBytes")?null:sample.getLong("rssBytes");
+        if(reason.isEmpty()) reason=dev.local.fuxicontrol.core.ManualCleanup.skip(rule,now-since,cpu,rss,fresh);
+        return new JSONObject().put("package",name).put("uid",uid).put("action",rule.getString("mode"))
+                .put("eligible",reason.isEmpty()).put("reason",reason).put("backgroundMs",now-since);
+    }
+    public synchronized JSONObject manualCleanupOne(String name,long revision,JSONObject metrics) throws Exception {
+        JSONObject config=store.get();
+        if(config.getLong("revision")!=revision || !config.getString("mode").equals("enforce"))
+            return new JSONObject().put("package",name).put("state","skipped").put("reason","配置已变化");
+        if(!runningPackages().contains(name)) return new JSONObject().put("package",name).put("state","exited");
+        JSONObject candidate=manualCleanupCandidate(name,catalog.snapshot(config).getJSONObject("effective"),metrics);
+        if(!candidate.getBoolean("eligible")) return candidate.put("state","skipped");
+        Shell.run("am",candidate.getString("action").equals("cached")?"kill":"force-stop","--user","0",name);
+        candidate.put("state",runningPackages().contains(name)?"requested":"exited");
+        audit.record("manual-cleanup",candidate);
+        return candidate;
+    }
     public synchronized JSONObject listServices(String name) throws Exception {return services.list(name,store.get());}
     public synchronized JSONObject stopService(String name,String cls,boolean dryRun) throws Exception {
         JSONObject effective=catalog.snapshot(store.get()).getJSONObject("effective");
@@ -327,5 +406,10 @@ public final class RuntimeEngine {
             }
         },delay,TimeUnit.MILLISECONDS);
     }
-    public JSONObject networkStats(int uid) throws org.json.JSONException {return new JSONObject(Native.networkStats(uid));}
+    public JSONObject networkStats(int uid) throws org.json.JSONException {
+        JSONObject result=new JSONObject(Native.networkStats(uid));
+        JSONArray rows=result.optJSONArray("counters"),apps=new JSONArray();
+        if(rows!=null) {for(int i=0;i<rows.length();i++)if(rows.getJSONObject(i).optLong("cgroupId")==0)apps.put(rows.getJSONObject(i));result.put("counters",apps);}
+        return result;
+    }
 }

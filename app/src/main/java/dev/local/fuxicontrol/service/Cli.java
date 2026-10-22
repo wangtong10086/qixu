@@ -10,6 +10,12 @@ public final class Cli {
     private static final String USAGE="""
             fuxictl status|capabilities|apps|explain PACKAGE
             fuxictl search QUERY [all|name|declared|granted|policy]
+            fuxictl resources snapshot|settings|clear
+            fuxictl resources history SCOPE IDENTITY [SINCE_MILLIS]
+            fuxictl resources settings true|false
+            fuxictl process list PACKAGE | apply PACKAGE PROCESS FILE | inherit PACKAGE PROCESS
+            fuxictl apps batch-apply PACKAGES_JSON_FILE PATCH_JSON_FILE
+            fuxictl cleanup preview|status | run PREVIEW_ID REVISION
             fuxictl running
             fuxictl services PACKAGE
             fuxictl service block|restore|stop PACKAGE CLASS
@@ -39,7 +45,28 @@ public final class Cli {
     public static JSONObject request(String[] a) throws Exception {
         JSONObject r=new JSONObject();
         switch(a[0]) {
-            case "status","capabilities","apps","audit" -> r.put("command",a[0]);
+            case "cleanup" -> {
+                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"preview","run","status");
+                r.put("command","cleanup."+a[1]);
+                if(a[1].equals("run")) r.put("id",a[2]).put("expectedRevision",Long.parseLong(a[3]));
+            }
+            case "status","capabilities","audit" -> r.put("command",a[0]);
+            case "resources" -> {
+                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"snapshot","history","settings","clear");
+                r.put("command","resources."+a[1]);
+                if(a[1].equals("history")) {r.put("scope",a[2]).put("identity",a[3]);if(a.length>4)r.put("since",Long.parseLong(a[4]));}
+                if(a[1].equals("settings")&&a.length>2) {dev.local.fuxicontrol.core.Policy.oneOf(a[2],"true","false");r.put("history",Boolean.parseBoolean(a[2]));}
+            }
+            case "process" -> {
+                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"list","apply","inherit");
+                r.put("package",a[2]);
+                if(a[1].equals("list"))r.put("command","resources.snapshot");
+                else {r.put("command",a[1].equals("apply")?"process.policy.patch":"process.policy.inherit").put("process",a[3]);if(a[1].equals("apply"))r.put("rule",new JSONObject(Text.read(Path.of(a[4]))));}
+            }
+            case "apps" -> {
+                if(a.length==1)r.put("command","apps");
+                else {dev.local.fuxicontrol.core.Policy.oneOf(a[1],"batch-apply");r.put("command","apps.batch.patch").put("packages",new JSONArray(Text.read(Path.of(a[2])))).put("patch",new JSONObject(Text.read(Path.of(a[3]))));}
+            }
             case "ads" -> {
                 if(a[1].equals("status")) r.put("command","ads.status");
                 else if(a[1].equals("retry")) r.put("command","ads.retry").put("package",a[2]);
@@ -79,7 +106,7 @@ public final class Cli {
                                 yield Boolean.parseBoolean(a[4]);
                             }
                             case "uploadBps","downloadBps" -> rate(a[4]);
-                            case "services","permissions","appOps" -> new JSONObject(a[4]);
+                            case "cpuQuota","manualCleanup","services","permissions","appOps" -> new JSONObject(a[4]);
                             case "wakeLocks" -> new JSONArray(a[4]);
                             default -> a[4];
                         };
@@ -119,8 +146,8 @@ public final class Cli {
     public static void main(String[] args) {
         if(args.length==0 || args[0].equals("help")) {System.out.print(USAGE);return;}
         try {
+            if(android.system.Os.getuid()!=0) throw new SecurityException("CLI requires root");
             if(args[0].equals("recover")) {
-                if(android.system.Os.getuid()!=0) throw new SecurityException("Root required");
                 System.out.print(Shell.run("sh","/data/adb/fuxicontrol/recover.sh"));return;
             }
             JSONObject result=Wire.call(request(args));

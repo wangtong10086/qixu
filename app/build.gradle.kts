@@ -10,12 +10,16 @@ android {
         applicationId = "dev.local.fuxicontrol"
         minSdk = 36
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.5.0-alpha4"
+        versionCode = 17
+        versionName = "0.6.0-alpha7"
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true; buildConfig = true }
+    buildFeatures {
+        aidl = true
+        compose = true
+        buildConfig = true
+    }
     packaging { jniLibs.useLegacyPackaging = true; resources { merges += "META-INF/xposed/*" } }
     buildTypes { release { isMinifyEnabled = false } }
 }

@@ -5,8 +5,10 @@ public final class Native {
     public static native String networkApply(int uid,long uploadBps,long downloadBps,int burstBytes,int denyMask);
     public static native String networkStats(int uid);
     public static native void networkClear();
+    public static native void networkPrune(long[] groups);
+    public static native long cgroupId(String path) throws java.io.IOException;
+    public static native void processNetworkApply(long group,long upload,long download,int burst,int deny);
     public static native void networkAlias(int uid,int owner);
     public static native void clamp(int tid,int minimum,int maximum);
     public static native int[] getClamp(int tid);
-    public static native void socketLabel(boolean enable);
 }

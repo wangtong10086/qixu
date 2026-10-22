@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.6.0-alpha7
+
+- 全部正式界面使用系统 Monet 动态配色，跟随壁纸色板与深浅色模式。
+- 统一主页、资源详情、弹窗、启动背景和系统栏的主题。
+
+## 0.6.0-alpha6
+
+- 主页改为 CPU 单环与内存／Swap 嵌套环，保留实时网速和资源详情入口。
+- 补充 Swap 总容量及历史采样，区分未启用、等待采样和数据过期状态。
+- 环形图适配大字体与读屏，遵循系统动画设置。
+
+## 0.6.0-alpha5
+
+- 增加 v1 UID 聚合 CPU 配额、线程分组恢复记录及前后台切换。
+- 增加关键应用显式 CPU 配额开关，保留其他服务保护。
+- 实机验证后台 1% 额度和前台解除；系统任务迁移存在事件更新/定期复核窗口，隔离 UID 和 v1 进程子配额限制见 CPU 配额文档。
+
+## 0.6.0-alpha4 · 安装验收修正
+
+- 清理预览使用完整应用索引，修复加载图标时缺失 lastUpdateTime 导致的界面崩溃。
+- 安装器保留 Vector 模块启用状态，并在升级后刷新 APK 路径，避免重启仍引用已删除的旧安装目录。
+- 实机验证 Binder 连接、17 项系统钩子、资源首页、清理预览及返回；CPU 硬配额仍未获当前内核支持。
+
+## 0.6.0-alpha3 · 实机安装修正
+
+- 修复系统钩子在 ActivityManager 初始化前调用 ContentResolver 导致 system_server 重启的问题：系统 UID 等待启动完成，并使用 external-provider Binder 发现路径。
+- 监听系统 Binder 死亡，由现有 supervisor 重建 root 进程，避免继续使用失效的 framework singleton。
+- alpha2 为离线候选，存在上述启动缺陷，不应继续安装；使用 alpha4。
+
+## 0.6.0-alpha2 · 离线候选
+
+- 控制通道迁移到 Binder/AIDL，删除控制 socket 和对应 SELinux 类型注入。
+- schema 3：前后台 CPU 时间配额、独立手动清理规则及全部配置方案迁移。
+- 清理预览/执行/状态 CLI 与界面，执行前保护复核和配置冲突检查。
+- 首页实时 CPU 动画与 60 秒曲线；缺失采样留空。
+- CPU 内核提交锁定、配置准备和差异报告工具。当前设备内核及任务组尚未验收，没有可刷入镜像。
+
+## 0.6.0-alpha1
+
+- 增加整机、应用和进程资源采样、历史查询、应用资源排序及批量管理。
+- 增加进程前后台 CPU／内存／网络规则，保留活动任务豁免及应用共享预算。
+- eBPF 对不限速应用也统计流量，增加进程 socket cgroup 归属与双层预算。
+- schema 1 备份迁移至 schema 2；CLI 与界面使用同一策略接口。
+- 当前内核仍不支持 CPU 时间硬配额；统计口径及首次规则绑定延迟见 docs/resources.md。
+
 ## 0.5.0-alpha4
 
 - Add per-application splash adapters for QQ Music, Zhihu, JD, Xiaohongshu, Amap, bilibili and Taobao, with local status reporting and reversible Vector scope changes.

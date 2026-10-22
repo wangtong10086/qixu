@@ -4,14 +4,16 @@ Implementation: `Wire.java`, `RootDaemon.java`, `Commands.java`, `Store.java`, `
 
 ## Transport and authentication
 
-Android abstract UNIX stream socket: `fuxicontrol.v1`. UTF-8 JSON, one request object followed by `\n`; one response object per normal connection. This is not HTTP/OpenAPI or a network port.
+AIDL `IController` is discovered through `content://dev.local.fuxicontrol.ipc` in the separate `:ipc` process. Only UID 0 can register the root endpoint. The provider is Direct Boot aware and stores no policy.
 
 - UID 0: full commands.
-- Manager UID: package `dev.local.fuxicontrol` and signing digest matching the root-owned `manager.sha256`.
-- UID 1000: only `watch`, `event`, `status`; this is a trusted system UID boundary, not authentication of a particular hook class.
-- Others: connection closed. Clients verify the server peer is UID 0.
+- Manager UID: package `dev.local.fuxicontrol` and signing digest matching root-owned `manager.sha256`.
+- UID 1000: only `watch`, `event`, `status`.
+- Other callers: only the splash channel, limited to a supported package owned by their UID; reports additionally match the watching PID.
 
-Server permits 16 simultaneous connections, including watchers. Read timeout is 10 seconds; normal `Wire.call` timeout is 15 seconds. The current parser caps a request at 1,048,576 Java UTF-16 code units (the implementation's error text says “1 MiB”; it is not a byte-accurate limit). Authentication/parse errors can close the socket without an error object.
+Caller UID/PID is captured in the Binder transaction before dispatch. Discovery is public; possession of an endpoint does not authorize management commands.
+`open(request, lifetime)` returns a reliable anonymous pipe. Responses remain newline-delimited JSON, avoiding Binder's response-size limit. `watch` streams snapshots on config changes; Binder death or `cancel(lifetime)` releases the worker. No network connection or listening socket is involved.
+Requests are capped at 262144 UTF-16 code units. There are 48 active slots, at most 8 per UID. Normal pipe reads time out after 15 seconds of inactivity; Binder discovery/open is not covered by that pipe timeout. Writes are never automatically retried, since a timed-out command may have executed. Re-query state before another write. Reconnection discovers a new endpoint; system and splash watchers subscribe again through their existing watch lifecycle.
 
 ## Normal request / response
 
@@ -20,7 +22,7 @@ Server permits 16 simultaneous connections, including watchers. Read timeout is 
 ```
 
 ```json
-{"ok":true,"result":{"service":true,"mode":"observe","revision":4,"schema":1}}
+{"ok":true,"result":{"service":true,"mode":"observe","revision":4,"schema":3}}
 ```
 
 The sample result is abbreviated. Command execution errors use:
@@ -74,7 +76,7 @@ Config persistence and runtime execution are separate: runtime reconciliation ca
 
 ## Policy schema
 
-Root fields: `schema:1`, `revision`, `mode`, `defaults`, `apps`, `rules`, `pushProxy`. The service owns persisted revision increments. See [policy.md](policy.md) for fields and units. See [examples](../examples/README.md) for synthetic values.
+Root fields: `schema:3`, `revision`, `mode`, `defaults`, `apps`, `rules`, `pushProxy`. The service owns persisted revision increments. See [policy.md](policy.md) for fields and units. See [examples](../examples/README.md) for synthetic values.
 
 Rules contain `id`, `enabled`, `event` (`foreground-left` or `push-arrived`), `package`, `action` (`record` or `kill-cached`) and `delayMs` (0–86400000).
 
@@ -88,7 +90,7 @@ Push proxy entries are keyed by package. Supported boolean fields are `enabled`,
 
 ## Compatibility
 
-The v1 address and schema are retained for existing installations. New optional fields must not silently change the meaning of existing values. Breaking changes require an explicit schema/protocol migration and updated fixtures. Root storage paths and the historical Fuxi package ID are compatibility identifiers, not the current product name.
+The historical package ID and data directory are retained for existing installations. Binder discovery uses `dev.local.fuxicontrol.ipc` with protocol 1; policy schema 3 migrates schema 1/2 and their named profiles before use. New optional fields must not silently change the meaning of existing values. Breaking changes require an explicit schema/protocol migration and updated fixtures. Root storage paths and the historical Fuxi package ID are compatibility identifiers, not the current product name.
 
 ## Application discovery (0.3)
 
@@ -124,7 +126,7 @@ Each app is grouped by its most important process: importance ≥ 400 is cached,
 Timestamps use device elapsed realtime, not Unix time. Snapshots are inherently point-in-time.
 
 Icons load only for visible UI items, with three concurrent requests and a 64-image LRU cache (128 × 128 pixels each).
-The UI stops launching new running polls when paused or on another page; an in-flight socket call remains bounded by its existing timeout.
+The UI stops launching new running polls when paused or on another page; an in-flight Binder/pipe call remains bounded by its existing timeout.
 Failed polls retain the previous snapshot with an explicit warning, rather than displaying an empty running list.
 
 ### Named configuration profiles
@@ -144,3 +146,34 @@ The existing `config.get` / `config.replace` commands support full backup and re
 `ads.status` retains its existing fields. `matched` now means accepted signing identity, not an exact version match. Installed entries add `updated`, `inspectedVersion`, `crossVersion`, `suspended`, and `suspendReason`. Actual method resolution and interception remain separate `report.state` values (`ready`, `blocked`, `unsupported`, `error`). A `healthy` channel report updates persisted health only and does not overwrite the visible last result.
 
 `ads.retry` accepts `package` and optional `dryRun`; root and the signed manager retain their normal write permissions. It clears only that installation's startup breaker and recent report. It does not change policy revision, mode, ad switch, or profile. Reopen the target app after retry. The CLI form is `fuxictl ads retry PACKAGE [--dry-run]`.
+
+## 0.6 资源与进程接口
+
+- `resources.snapshot`：整机与应用／进程快照，采样时间、ageMs、error、networkAvailable；请求会续期十秒前台采样。
+- `resources.snapshot.system` 新增 `swapTotalBytes`（字节），与 `swapUsedBytes` 一起记录到历史；旧历史缺少总量时不推算。总量为 0 表示未启用 Swap。
+- `resources.detail`：package、可选 process；返回 PSS、主线程调度、内存限额与当前阶段／豁免。
+- `resources.history`：scope=system/app/process、identity、since（Unix 毫秒），返回样本与最早记录时间。
+- `resources.settings`：可选 history 布尔值；读取或改变历史记录。
+- `resources.clear`：清空资源历史，不修改应用策略。
+- `process.policy.patch`：package、process、rule；替换该进程的两阶段规则。
+- `process.policy.inherit`：package、process；删除额外进程规则。
+- `apps.batch.patch`：packages 数组、patch 资源字段；原子保存，未给出字段保留。
+
+后三项支持 expectedRevision 与 dryRun；沿用保存后执行机制，执行错误须通过状态检查，不能把配置保存当作内核已生效。schema 3 增加 CPU 配额和手动清理，schema 1/2 导入自动迁移所有方案。完整语义见 resources.md。
+
+## Manual cleanup and CPU quota (schema 3)
+
+- `cleanup.preview` → `{id, revision, createdElapsedMs, mode, apps}`. Starts a 45-second measurement window, returns eligibility and skip reasons.
+- `cleanup.run` requires `id` and `expectedRevision`. Returns a job; preview expires in 60 seconds and can only be consumed once.
+- `cleanup.status` returns `{id, state, results, error}`. Never replay `run` to poll.
+- CLI: `fuxictl cleanup preview`, `fuxictl cleanup run ID REVISION`, `fuxictl cleanup status`.
+- `cpuQuota`: `{periodUs:100000, foregroundUs:0, backgroundUs:0}`. Applies to defaults/app patches and process phase resource patches. Zero disables; CPU time and period are microseconds. Shared UID policies must agree.
+- `manualCleanup`: `{mode:"cached", backgroundSeconds:60, cpuPercent:0, rssMiB:0}`. `cpuPercent` is the device-wide normalized 30-second average; zero ignores that threshold. Global `force-stop` is rejected.
+- Configured quota is separate from runtime `cpuQuota.state` / `applied` / `reason` / `cpuStat`. A pending layout is not enforcement.
+
+
+### CPU quota on a protected application
+
+`cpuQuota` accepts optional boolean `allowProtected` (default false). Explicitly enabling it permits the UID budget despite protected/resident cleanup status; startup, network and active-task exemptions are unchanged. Shared-UID applications must agree on this flag and all quota values.
+
+The v1 backend reports `backend: cgroup-v1-uid`, `actual: "quota_us period_us"`, `cpuStat`, and `reassignedThreads`. `waiting-process` means no process exists to bind; isolated UIDs report `pending-layout`. Foreground/off restores owned membership. Android migration is event-driven with a five-second reconciliation interval; `applied` describes the observed kernel group, not a zero-latency migration guarantee. See [CPU quota](cpu-quota.md) for measured low-budget overhead.

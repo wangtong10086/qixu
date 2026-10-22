@@ -13,8 +13,10 @@ public final class Commands {
     private final RuntimeEngine engine;
     private final AppDiscovery discovery;
     private final SplashChannel splash;
-    public Commands(Store store,Catalog catalog,Audit audit,RuntimeEngine engine,SplashChannel splash) {
-        this.store=store;this.catalog=catalog;this.audit=audit;this.engine=engine;this.discovery=new AppDiscovery(catalog);this.splash=splash;
+    private final ResourceMonitor resources;
+    private final ManualCleanupController cleanup;
+    public Commands(Store store,Catalog catalog,Audit audit,RuntimeEngine engine,SplashChannel splash,ResourceMonitor resources) {
+        this.store=store;this.catalog=catalog;this.audit=audit;this.engine=engine;this.discovery=new AppDiscovery(catalog);this.splash=splash;this.resources=resources;this.cleanup=new ManualCleanupController(store,engine,resources);
     }
     public synchronized JSONObject execute(JSONObject request) throws Exception {
         String command=request.getString("command");
@@ -23,8 +25,11 @@ public final class Commands {
             throw new IllegalStateException("Configuration changed; reload before saving");
         JSONObject result;
         switch(command) {
+            case "cleanup.preview" -> {return cleanup.preview();}
+            case "cleanup.run" -> {return cleanup.run(request.getString("id"),request.getLong("expectedRevision"));}
+            case "cleanup.status" -> {return cleanup.status();}
             case "status" -> { return engine.status().put("revision",config.getLong("revision"))
-                    .put("mode",config.getString("mode")).put("schema",1); }
+                    .put("mode",config.getString("mode")).put("schema",config.getInt("schema")); }
             case "capabilities" -> { return engine.capabilities(); }
             case "apps" -> { return new JSONObject().put("apps",catalog.applications()); }
             case "apps.index" -> { return discovery.index(config,request.optString("query",""),request.optString("scope","all")); }
@@ -48,6 +53,40 @@ public final class Commands {
                 if(!app.has("services")) app.put("services",new JSONObject());
                 if(mode.equals("block")) app.getJSONObject("services").put(cls,"block");
                 else app.getJSONObject("services").remove(cls);
+            }
+            case "resources.snapshot" -> {
+                JSONObject value=resources.snapshot();
+                if(request.has("package")) {
+                    String name=request.getString("package");Policy.packageName(name);
+                    JSONObject apps=value.optJSONObject("apps"),filtered=new JSONObject();
+                    if(apps!=null&&apps.has(name))filtered.put(name,apps.get(name));
+                    value.put("apps",filtered).put("package",name);
+                }
+                return value;
+            }
+            case "resources.detail" -> {return resources.detail(request.getString("package"),request.optString("process",""));}
+            case "resources.history" -> {return resources.history(request.optString("scope","system"),request.optString("identity",""),request.optLong("since",System.currentTimeMillis()-86400000));}
+            case "resources.settings" -> {return resources.settings(request.has("history")?request.getBoolean("history"):null);}
+            case "resources.clear" -> {return resources.clear();}
+            case "process.policy.patch", "process.policy.inherit" -> {
+                String name=request.getString("package"),process=request.getString("process");Policy.packageName(name);
+                JSONObject apps=config.getJSONObject("apps"),app=apps.optJSONObject(name);
+                if(app==null) {app=new JSONObject();apps.put(name,app);}
+                JSONObject rules=app.optJSONObject("processes");if(rules==null) {rules=new JSONObject();app.put("processes",rules);}
+                if(command.equals("process.policy.inherit")) rules.remove(process);
+                else rules.put(process,request.getJSONObject("rule"));
+            }
+            case "apps.batch.patch" -> {
+                JSONObject patch=request.getJSONObject("patch");Policy.validatePatch(patch);
+                for(String field:dev.local.fuxicontrol.core.Json.keys(patch)) if(!dev.local.fuxicontrol.core.ProcessPolicy.FIELDS.contains(field))
+                    throw new IllegalArgumentException("Batch resource fields only");
+                JSONArray names=request.getJSONArray("packages");
+                for(int i=0;i<names.length();i++) {
+                    String name=names.getString(i);Policy.packageName(name);
+                    JSONObject apps=config.getJSONObject("apps"),app=apps.optJSONObject(name);
+                    if(app==null) {app=new JSONObject();apps.put(name,app);}
+                    for(String field:dev.local.fuxicontrol.core.Json.keys(patch)) app.put(field,patch.get(field));
+                }
             }
             case "apps.running" -> { return discovery.running(engine.activeTaskUids()); }
             case "config.get" -> { return config; }
@@ -78,7 +117,7 @@ public final class Commands {
             }
             case "profile.create" -> { dev.local.fuxicontrol.core.Profiles.create(config,request.getString("name")); }
             case "profile.activate" -> { config=dev.local.fuxicontrol.core.Profiles.activate(config,request.getString("id")); }
-            case "config.replace" -> { config=Policy.copy(request.getJSONObject("config")); }
+            case "config.replace" -> { config=Policy.migrate(request.getJSONObject("config")); }
             case "rules.get" -> { return new JSONObject().put("rules",config.getJSONArray("rules")); }
             case "rules.replace" -> { config.put("rules",request.getJSONArray("rules")); }
             case "audit" -> { return new JSONObject().put("records",audit.tail()); }

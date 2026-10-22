@@ -1,6 +1,6 @@
 # 本地管理服务与断连排查
 
-栖序通过 Android `LocalSocket` 连接 `fuxicontrol.v1` Unix domain socket，
+当前版本通过 Android Binder/AIDL 连接本机 root 服务，独立 Direct Boot ContentProvider 提供接口发现，
 不使用 TCP、DNS、互联网或远程服务器。管理应用也没有申请 INTERNET 权限。
 VPN、Wi-Fi 和移动数据不是管理连接的前提。
 
@@ -18,7 +18,7 @@ VPN、Wi-Fi 和移动数据不是管理连接的前提。
 
 `supervise.sh` 使用排他锁保证单个守护者，等待 daemon 退出后延迟 5 秒重启。
 `stop.sh` 先设置显式停止标记，再停止守护者和 daemon，避免安装/恢复时被重新拉起。
-`start.sh` 清除停止标记并等待监听就绪。开机入口仍是 Magisk service.d，
+`start.sh` 清除停止标记并等待 Binder 注册就绪。开机入口仍是 Magisk service.d，
 仅等待 Android 启动完成，不检查任何网络状态。
 
 ## 查看状态
@@ -42,3 +42,7 @@ logcat 的对应 PID 查询。避免直接分享含应用策略、账号信息�
 强制结束 daemon 后自动换 PID 恢复；还原网络开关后策略内容不变。
 手机重启后资源记录携带新的 boot ID，服务自动启动；解锁后的界面显示
 “正在执行 / 已连接 · 日常”，16/16 钩子就绪，服务错误字段为空。
+
+## Binder 实机验收
+
+alpha4 已验证首次解锁前连接、17 项系统钩子、发现进程退出后的重新连接，以及清理预览和返回导航。旧控制 socket 已移除。0.4.1 的断网测试属于旧传输版本，新版本未重复切换无线网络验收；不能混用两代结果。详见 [验证记录](validation.md)；迁移与回滚要求见 [离线升级说明](offline-resource-upgrade.md)。

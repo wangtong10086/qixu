@@ -22,7 +22,7 @@ public class NetworkService extends Service {
                 if(test.equals("upload")) {
                     while(android.os.SystemClock.elapsedRealtime()-before<20000) {out.write(data);bytes+=data.length;}
                 } else if(test.equals("download")) {
-                    int count;while((count=socket.getInputStream().read(data))!=-1) bytes+=count;
+                    int count;while(android.os.SystemClock.elapsedRealtime()-before<20000 && (count=socket.getInputStream().read(data))!=-1) bytes+=count;
                 } else throw new IllegalArgumentException("Unknown probe test");
                 long elapsed=android.os.SystemClock.elapsedRealtime()-before;
                 String result="{\"test\":\""+test+"\",\"bytes\":"+bytes+",\"elapsedMs\":"+elapsed+",\"bps\":"+(bytes*8000/Math.max(1,elapsed))+"}";

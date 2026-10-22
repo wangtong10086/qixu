@@ -12,22 +12,63 @@ public final class ResourceController {
     private final Path journalFile;
     private final JSONObject journal;
     private final String bootId;
+    private final V1CpuQuota v1;
     public ResourceController(Path root) throws Exception {
+        v1=new V1CpuQuota(root);
         journalFile=root.resolve("resources.json");
         bootId=Text.read(Path.of("/proc/sys/kernel/random/boot_id")).trim();
         JSONObject saved=Files.exists(journalFile)?new JSONObject(Text.read(journalFile)):new JSONObject();
         journal=dev.local.fuxicontrol.core.ResourceJournal.entries(saved,bootId);
     }
-    private void persist() throws Exception {Store.atomic(journalFile,new JSONObject().put("bootId",bootId).put("entries",journal).toString());}
+    private String persisted;
+    private void persist() throws Exception {
+        String value=new JSONObject().put("bootId",bootId).put("entries",journal).toString();
+        if(!value.equals(persisted)) {Store.atomic(journalFile,value);persisted=value;}
+    }
     public synchronized void memory(int uid,long highMiB,long maxMiB) throws Exception {
         Path group=Path.of("/sys/fs/cgroup/apps/uid_"+uid);
         if(!Files.isDirectory(group)) return; // Android removes empty UID groups.
         applyFile(group.resolve("memory.high"), highMiB==0?null:Long.toString(Math.multiplyExact(highMiB,1048576)));
         applyFile(group.resolve("memory.max"), maxMiB==0?null:Long.toString(Math.multiplyExact(maxMiB,1048576)));
     }
+    public synchronized JSONObject cpuQuota(int uid,JSONObject quota,boolean foreground,boolean exempt,boolean hasIsolated) throws Exception {
+        Path group=Path.of("/sys/fs/cgroup/apps/uid_"+uid),file=group.resolve("cpu.max");
+        long budget=dev.local.fuxicontrol.core.CpuQuota.budget(quota,foreground,exempt);
+        JSONObject result=new JSONObject().put("configured",quota).put("phase",foreground?"foreground":"background").put("applied",false);
+        if(V1CpuQuota.supported()) {
+            if(hasIsolated) {v1.restore(uid);return result.put("state","pending-layout").put("reason","隔离进程尚未归入同一个 CPU 预算组");}
+            JSONObject applied=v1.apply(uid,budget,quota.getLong("periodUs"),processes.getOrDefault(uid,java.util.List.of()));
+            for(String key:dev.local.fuxicontrol.core.Json.keys(applied))result.put(key,applied.get(key));
+            return result;
+        }
+        if(!Files.exists(file)) return result.put("state",budget==0?"off":"pending-kernel").put("reason","需要启用 CFS bandwidth 的内核及经过验证的 UID CPU 层级");
+        // Do not copy an app budget to each isolated UID: that would multiply its allowance.
+        if(hasIsolated) {applyFile(file,null);return result.put("state","pending-layout").put("reason","隔离进程尚未归入同一个 CPU 预算组");}
+        for(Path process:processes.getOrDefault(uid,java.util.List.of())) {
+            try(var threads=Files.list(process.resolve("task"))) {
+                for(Path task:threads.toList()) {
+                    String relative=Text.read(task.resolve("cgroup")).lines().filter(line->line.startsWith("0::")).findFirst().orElseThrow().substring(3);
+                    if(!relative.startsWith("/apps/uid_"+uid+"/")) {
+                        applyFile(file,null);return result.put("state","pending-layout").put("reason","线程尚未归入统一 UID CPU 层级");
+                    }
+                }
+            } catch(java.nio.file.NoSuchFileException exited) { /* Android removes exited tasks. */ }
+        }
+        applyFile(file,budget==0?null:budget+" "+quota.getLong("periodUs"));
+        JSONObject statistics=new JSONObject();
+        for(String line:Text.read(group.resolve("cpu.stat")).lines().toList()) {
+            String[] fields=line.trim().split("\\s+");statistics.put(fields[0],Long.parseLong(fields[1]));
+        }
+        return result.put("state",budget==0?(exempt?"exempt":"off"):"applied").put("applied",budget>0)
+                .put("cpuStat",statistics).put("actual",Text.read(file).trim());
+    }
     private void applyFile(Path path,String desired) throws Exception {
-        String key=path.toString();String current=Text.read(path).trim();
+        String key=path.toString();
         JSONObject previous=journal.optJSONObject(key);
+        if(desired==null && previous==null) return;
+        String current=Text.read(path).trim();
+        long identity=Native.cgroupId(path.getParent().toString());
+        if(previous!=null && previous.has("cgroupId") && previous.getLong("cgroupId")!=identity) {journal.remove(key);previous=null;}
         if(desired==null) {
             if(previous==null) return;
             if(current.equals(previous.getString("applied"))) Text.write(path,previous.getString("before"));
@@ -36,7 +77,7 @@ public final class ResourceController {
         if(previous!=null && !current.equals(previous.getString("applied"))) previous.put("before",current);
         if(previous!=null && current.equals(desired)) return;
         if(previous==null) {
-            previous=new JSONObject().put("before",current);journal.put(key,previous);
+            previous=new JSONObject().put("before",current).put("cgroupId",identity);journal.put(key,previous);
         }
         previous.put("applied",desired);persist();Text.write(path,desired);
     }
@@ -65,10 +106,51 @@ public final class ResourceController {
             } catch(java.nio.file.NoSuchFileException gone) { /* Process exited during reconciliation. */ }
         }
     }
+    private final Set<Long> currentNetworks=new HashSet<>();
+    public synchronized void beginProcesses() {currentNetworks.clear();}
+    public synchronized void finishProcesses() throws Exception {
+        for(String key:new HashSet<>(dev.local.fuxicontrol.core.Json.keys(journal))) if(key.startsWith("network:")) {
+            long id=Long.parseLong(key.substring(8));
+            if(!currentNetworks.contains(id)) {Native.processNetworkApply(id,0,0,65536,0);journal.remove(key);}
+        }
+    }
+    public synchronized void processRules(int uid,JSONObject policy,boolean foreground,boolean activity,boolean quotaProtected) throws Exception {
+        JSONObject rules=policy.optJSONObject("processes");
+        for(Path process:processes.getOrDefault(uid,java.util.List.of())) {
+            try {
+                String name=Text.read(process.resolve("cmdline")).split("\\x00",2)[0];
+                JSONObject rule=rules==null?null:rules.optJSONObject(name);
+                String relative=Text.read(process.resolve("cgroup")).lines().filter(l->l.startsWith("0::")).findFirst().orElseThrow().substring(3);
+                if(!relative.startsWith("/apps/uid_"+uid+"/pid_")) continue;
+                Path group=Path.of("/sys/fs/cgroup"+relative);
+                JSONObject effective=dev.local.fuxicontrol.core.ProcessPolicy.effective(policy,rule==null?new JSONObject():rule,foreground,activity);
+                try(var tids=Files.list(process.resolve("task"))) {
+                    for(Path task:tids.toList()) updateTask(task,effective.getInt("cpuNice"),effective.getInt("uclampMax"),effective.getInt("cpuNice")!=0 || effective.getInt("uclampMax")!=1024);
+                }
+                Path cpu=group.resolve("cpu.max");
+                if(Files.exists(cpu)) {
+                    JSONObject quota=effective.getJSONObject("cpuQuota");
+                    long budget=dev.local.fuxicontrol.core.CpuQuota.budget(quota,foreground,effective.getBoolean("exempt")||quotaProtected);
+                    applyFile(cpu,budget==0?null:budget+" "+quota.getLong("periodUs"));
+                }
+                long high=effective.getLong("memoryHighMiB"),max=effective.getLong("memoryMaxMiB");
+                applyFile(group.resolve("memory.high"),high==0?null:Long.toString(high*1048576));
+                applyFile(group.resolve("memory.max"),max==0?null:Long.toString(max*1048576));
+                long id=Native.cgroupId(group.toString());
+                int deny=effective.getString("network").equals("deny") || (effective.getString("network").equals("background-deny")&&!foreground&&!activity)?3:0;
+                if(effective.getLong("uploadBps")>0 || effective.getLong("downloadBps")>0 || deny!=0) {
+                    if(!journal.has("network:"+id)) {journal.put("network:"+id,new JSONObject());persist();}
+                    Native.processNetworkApply(id,effective.getLong("uploadBps"),effective.getLong("downloadBps"),effective.getInt("burstBytes"),deny);currentNetworks.add(id);
+                }
+            } catch(java.nio.file.NoSuchFileException exited) { /* Process exited while reconciling. */ }
+        }
+    }
     private void updateTask(Path task,int nice,int clamp,boolean eligible) throws Exception {
         int tid=Integer.parseInt(task.getFileName().toString());
-        String key="task:"+tid;String identity=start(task);
+        String key="task:"+tid;
         JSONObject entry=journal.optJSONObject(key);
+        if(!eligible && entry==null) return;
+        String identity=start(task);
         if(entry!=null && !identity.equals(entry.getString("start"))) {journal.remove(key);entry=null;}
         int current;
         try {current=Process.getThreadPriority(tid);} catch(IllegalArgumentException gone) {return;}
@@ -100,6 +182,8 @@ public final class ResourceController {
         Process.setThreadPriority(tid,applied);Native.clamp(tid,minimum,clamp);
     }
     public synchronized void restoreAll() throws Exception {
+        v1.restoreAll();
+        beginProcesses();finishProcesses();
         if(journal.length()==0) return;
         for(String key:new HashSet<>(dev.local.fuxicontrol.core.Json.keys(journal))) {
             if(key.startsWith("task:")) {

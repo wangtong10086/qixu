@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/LineageOS/android_kernel_xiaomi_sm8550.git",
+  "commit": "03e6e48a5b4ed606dfdd48bc782a57f9c778938b",
+  "tree": "b00d44df3fedcb12436167151199a13a12e2ceb0",
+  "recordedKernelRelease": "5.15.207-g03e6e48a5b4e",
+  "recordedCompilerMajor": 21,
+  "device": "fuxi",
+  "requiredBaselineFiles": ["config", "boot.img", "vendor_boot.img", "dtbo.img", "Module.symvers", "toolchain.json", "vendor-modules.json", "task_profiles.json", "cgroups.json"],
+  "status": "source-commit-found-device-build-inputs-unverified",
+  "flashable": false
+}

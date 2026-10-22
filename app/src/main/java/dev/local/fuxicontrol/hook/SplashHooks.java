@@ -3,8 +3,8 @@ package dev.local.fuxicontrol.hook;
 import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
-import android.net.LocalSocket;
-import android.net.LocalSocketAddress;
+
+
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -173,17 +173,10 @@ final class SplashHooks {
             catch(ReflectiveOperationException e) {throw new IllegalStateException("Splash callback failed",e);}
         });
     }
-    private LocalSocket connect() throws IOException {
-        LocalSocket socket=new LocalSocket();
-        try {
-            socket.connect(new LocalSocketAddress(SplashChannel.ADDRESS));socket.setSoTimeout(500);
-            if(socket.getPeerCredentials().getUid()!=0) throw new SecurityException("Ad controller must be root");
-            return socket;
-        } catch(IOException | RuntimeException e) {socket.close();throw e;}
-    }
+    private Wire.Connection connect() throws IOException {var connection=Wire.splash();connection.setSoTimeout(500);return connection;}
     private synchronized void openWatch() throws IOException, JSONException {
         if(connected) return;
-        LocalSocket socket=connect();
+        Wire.Connection socket=connect();
         try {
             Wire.send(socket,new JSONObject().put("command","watch").put("package",name));
             var reader=Wire.reader(socket);String first=reader.readLine();
@@ -219,7 +212,7 @@ final class SplashHooks {
         if(state.equals("blocked") && now-lastReport<1000) return;
         lastReport=now;
         worker.post(()->{
-            try(LocalSocket socket=connect()) {
+            try(Wire.Connection socket=connect()) {
                 Wire.send(socket,new JSONObject().put("command","report").put("package",name).put("state",state)
                         .put("detail",detail.substring(0,Math.min(detail.length(),240))));
                 if(Wire.reader(socket).readLine()==null) throw new IOException("Ad report not acknowledged");

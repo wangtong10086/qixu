@@ -3,6 +3,7 @@
 Vector activation and optional Thanox migration are separate operations.
 """
 import hashlib
+import json
 from pathlib import Path
 import re
 import shlex
@@ -20,6 +21,13 @@ signer = re.search(r"Signer #1 certificate SHA-256 digest: ([0-9a-f]+)", cert).g
 # Capture this controller's own state before replacing its executable files.
 import datetime
 existing=root("test ! -f /data/adb/fuxicontrol/controller.apk || echo installed").strip()
+vector="CLASSPATH=/data/adb/modules/zygisk_vector/daemon.apk app_process /system/bin org.matrix.vector.daemon.Cli "
+refresh_vector=False
+if existing and root("test ! -f /data/adb/modules/zygisk_vector/daemon.apk || echo present").strip():
+    modules=json.loads(root(vector+"modules ls --json"))
+    if not modules["success"]: raise RuntimeError("Cannot inspect Vector module activation")
+    refresh_vector=any(row["PACKAGE"]=="dev.local.fuxicontrol" and row["STATUS"]=="enabled" for row in modules["data"])
+
 if existing:
     adb("push",str(project/"tools/stop.sh"),"/data/local/tmp/fuxi-stop.sh")
     root("set -e; sh /data/local/tmp/fuxi-stop.sh; rm /data/local/tmp/fuxi-stop.sh")
@@ -27,7 +35,14 @@ if existing:
     with backup.open("xb") as handle:
         handle.write(archive(["/data/adb/fuxicontrol"]))
     backup.chmod(0o600)
+    # Detach with the OLD executable before replacing the BPF map ABI.
+    root('if [ -f /sys/fs/bpf/fuxicontrol/original_0 ]; then /data/adb/fuxicontrol/networkctl restore && rm -rf /sys/fs/bpf/fuxicontrol; fi')
 print(adb("install", "--no-incremental", "--no-streaming", "-r", str(apk)))
+if refresh_vector:
+    refreshed=json.loads(root(vector+"modules enable dev.local.fuxicontrol --json"))
+    if not refreshed["success"] or refreshed["data"]["Failed"]:
+        raise RuntimeError("Vector did not refresh the installed module path")
+
 root("mkdir -p /data/adb/fuxicontrol; chmod 0700 /data/adb/fuxicontrol")
 adb("push", str(apk), "/data/local/tmp/fuxi-controller.apk")
 root("cp /data/local/tmp/fuxi-controller.apk /data/adb/fuxicontrol/controller.apk.new; chmod 0600 /data/adb/fuxicontrol/controller.apk.new; mv /data/adb/fuxicontrol/controller.apk.new /data/adb/fuxicontrol/controller.apk; rm /data/local/tmp/fuxi-controller.apk")

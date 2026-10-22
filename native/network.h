@@ -9,7 +9,7 @@ struct limit {
     __u32 burst_bytes;
     __u32 deny_mask;
 };
-struct bucket_key { __u32 uid; __u32 direction; };
+struct bucket_key { __u32 uid; __u32 direction; __u64 cgroup_id; };
 struct bucket {
     struct bpf_spin_lock lock;
     __u32 pad;

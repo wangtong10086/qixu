@@ -3,7 +3,7 @@ package dev.local.fuxicontrol.hook;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
-import android.net.LocalSocket;
+
 import android.os.Binder;
 import dev.local.fuxicontrol.service.Wire;
 import io.github.libxposed.api.XposedModule;
@@ -42,6 +42,7 @@ public final class ModuleEntry extends XposedModule {
     }
 
     @Override public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
+        System.setProperty("qixu.push.lease.api","1");
         ClassLoader loader=param.getClassLoader();
         install(loader,"startup","com.android.server.am.ProcessList","startProcessLocked",chain->{
             if(activityManager==null) activityManager=chain.getThisObject().getClass().getField("mService").get(chain.getThisObject());
@@ -212,7 +213,7 @@ public final class ModuleEntry extends XposedModule {
         return backgroundPolicy(name,uid,policy(name));
     }
     private JSONObject backgroundPolicy(String name,int uid,JSONObject policy) {
-        if(!enforcing() || policy==null || uid<10000 || foreground.contains(uid) || foregroundServices.containsValue(uid)) return null;
+        if(dev.local.fuxicontrol.core.PushLease.active(name,android.os.SystemClock.elapsedRealtime()) || !enforcing() || policy==null || uid<10000 || foreground.contains(uid) || foregroundServices.containsValue(uid)) return null;
         if(android.os.SystemClock.elapsedRealtime()-lastForeground.getOrDefault(uid,-60000L)<30000) return null;
         if(foreground.contains(Binder.getCallingUid())) return null;
         return policy;
@@ -273,8 +274,8 @@ public final class ModuleEntry extends XposedModule {
     }
     private void watch() {
         while(true) {
-            try(LocalSocket socket=Wire.connect()) {
-                Wire.send(socket,new JSONObject().put("command","watch"));
+            try(Wire.Connection socket=Wire.connect()) {
+                Wire.send(socket,new JSONObject().put("command","watch"));socket.setSoTimeout(0);
                 var reader=Wire.reader(socket);String line;
                 while((line=reader.readLine())!=null) {
                     snapshot=new JSONObject(line);

@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <sys/stat.h>
 #include "network.h"
 
 static int bpf(int command,union bpf_attr *attr) {return syscall(__NR_bpf,command,attr,sizeof(*attr));}
@@ -19,13 +21,6 @@ static int mapfd(const char *name) {
 static void fail(JNIEnv *env,const char *operation) {
     char error[256];snprintf(error,sizeof(error),"%s: %s",operation,strerror(errno));
     (*env)->ThrowNew(env,(*env)->FindClass(env,"java/io/IOException"),error);
-}
-JNIEXPORT void JNICALL Java_dev_local_fuxicontrol_service_Native_socketLabel(JNIEnv *env,jclass type,jboolean enable) {
-    const char *label=enable?"u:object_r:fuxicontrol_socket:s0":"";
-    int fd=open("/proc/thread-self/attr/sockcreate",O_WRONLY|O_CLOEXEC);
-    if(fd<0) {fail(env,"Open socket creation context");return;}
-    ssize_t count=write(fd,label,strlen(label));int error=errno;close(fd);errno=error;
-    if(count!=(ssize_t)strlen(label)) fail(env,"Set socket creation context");
 }
 JNIEXPORT jstring JNICALL Java_dev_local_fuxicontrol_service_Native_networkApply(JNIEnv *env,jclass type,jint uid,jlong upload,jlong download,jint burst,jint deny) {
     int fd=mapfd("limits");if(fd<0) {fail(env,"Open limit map");return NULL;}
@@ -67,7 +62,7 @@ JNIEXPORT jstring JNICALL Java_dev_local_fuxicontrol_service_Native_networkStats
         if(errno==ENOENT) return (*env)->NewStringUTF(env,"{\"loaded\":false}");
         fail(env,"Open statistics map");return NULL;
     }
-    char json[131072];size_t n=snprintf(json,sizeof(json),"{\"loaded\":true,\"counters\":[");
+    const size_t capacity=1048576;char *json=malloc(capacity);if(!json){fail(env,"Allocate statistics");close(fd);return NULL;}size_t n=snprintf(json,capacity,"{\"loaded\":true,\"counters\":[");
     struct bucket_key key,next;int first=1;
     union bpf_attr attr={.map_fd=fd,.next_key=(uint64_t)&next};
     int result;
@@ -76,14 +71,14 @@ JNIEXPORT jstring JNICALL Java_dev_local_fuxicontrol_service_Native_networkStats
         if(uid>=0 && key.uid!=(__u32)uid) continue;
         struct bucket value;
         union bpf_attr get={.map_fd=fd,.key=(uint64_t)&key,.value=(uint64_t)&value,.flags=BPF_F_LOCK};
-        if(bpf(BPF_MAP_LOOKUP_ELEM,&get)<0) {if(errno==ENOENT)continue;fail(env,"Read network counters");close(fd);return NULL;}
-        if(n+512>=sizeof(json)) {errno=EOVERFLOW;fail(env,"Statistics response exceeds limit; query a UID");close(fd);return NULL;}
-        n+=snprintf(json+n,sizeof(json)-n,"%s{\"uid\":%u,\"direction\":\"%s\",\"passedBytes\":%llu,\"droppedBytes\":%llu,\"passedPackets\":%llu,\"droppedPackets\":%llu}",
-                first?"":",",key.uid,key.direction?"download":"upload",(unsigned long long)value.passed_bytes,(unsigned long long)value.dropped_bytes,
+        if(bpf(BPF_MAP_LOOKUP_ELEM,&get)<0) {if(errno==ENOENT)continue;fail(env,"Read network counters");free(json);close(fd);return NULL;}
+        if(n+512>=capacity) {errno=EOVERFLOW;fail(env,"Statistics response exceeds limit; query a UID");free(json);close(fd);return NULL;}
+        n+=snprintf(json+n,capacity-n,"%s{\"uid\":%u,\"cgroupId\":%llu,\"direction\":\"%s\",\"passedBytes\":%llu,\"droppedBytes\":%llu,\"passedPackets\":%llu,\"droppedPackets\":%llu}",
+                first?"":",",key.uid,(unsigned long long)key.cgroup_id,key.direction?"download":"upload",(unsigned long long)value.passed_bytes,(unsigned long long)value.dropped_bytes,
                 (unsigned long long)value.passed_packets,(unsigned long long)value.dropped_packets);first=0;
     }
-    if(result<0 && errno!=ENOENT) {fail(env,"Enumerate network counters");close(fd);return NULL;}
-    close(fd);snprintf(json+n,sizeof(json)-n,"]}");return (*env)->NewStringUTF(env,json);
+    if(result<0 && errno!=ENOENT) {fail(env,"Enumerate network counters");free(json);close(fd);return NULL;}
+    close(fd);snprintf(json+n,capacity-n,"]}");jstring output=(*env)->NewStringUTF(env,json);free(json);return output;
 }
 struct fuxi_sched_attr {
     __u32 size;__u32 policy;__u64 flags;__s32 nice;__u32 priority;
@@ -100,4 +95,39 @@ JNIEXPORT jintArray JNICALL Java_dev_local_fuxicontrol_service_Native_getClamp(J
     if(syscall(__NR_sched_getattr,tid,&attr,sizeof(attr),0)<0) {fail(env,"sched_getattr");return NULL;}
     jint values[]={attr.util_min,attr.util_max};jintArray result=(*env)->NewIntArray(env,2);
     (*env)->SetIntArrayRegion(env,result,0,2,values);return result;
+}
+
+JNIEXPORT jlong JNICALL Java_dev_local_fuxicontrol_service_Native_cgroupId(JNIEnv *env,jclass type,jstring path) {
+    // Linux 5.15 arm64 kernfs exposes the full 64-bit cgroup ID as st_ino.
+    // This device disables CONFIG_FHANDLE, so name_to_handle_at is unavailable.
+    struct stat info;const char *name=(*env)->GetStringUTFChars(env,path,NULL);
+    int result=stat(name,&info),error=errno;
+    if(result<0 && error==ENOENT) (*env)->ThrowNew(env,(*env)->FindClass(env,"java/nio/file/NoSuchFileException"),name);
+    (*env)->ReleaseStringUTFChars(env,path,name);errno=error;
+    if(result<0) {if(error!=ENOENT)fail(env,"Read cgroup identity");return 0;}
+    return (jlong)info.st_ino;
+}
+JNIEXPORT void JNICALL Java_dev_local_fuxicontrol_service_Native_processNetworkApply(JNIEnv *env,jclass type,jlong group,jlong upload,jlong download,jint burst,jint deny) {
+    int fd=mapfd("process_limits");if(fd<0) {fail(env,"Open process limit map");return;}
+    __u64 key=group;struct limit rule={upload,download,burst,deny};
+    union bpf_attr attr={.map_fd=fd,.key=(uint64_t)&key,.value=(uint64_t)&rule,.flags=BPF_ANY};
+    int result;
+    if(!upload&&!download&&!deny) {attr.value=0;attr.flags=0;result=bpf(BPF_MAP_DELETE_ELEM,&attr);if(result<0&&errno==ENOENT)result=0;}
+    else result=bpf(BPF_MAP_UPDATE_ELEM,&attr);
+    int error=errno;close(fd);errno=error;if(result<0)fail(env,"Update process limit");
+}
+JNIEXPORT void JNICALL Java_dev_local_fuxicontrol_service_Native_networkPrune(JNIEnv *env,jclass type,jlongArray groups) {
+    int fd=mapfd("buckets");if(fd<0) {if(errno!=ENOENT)fail(env,"Open counters for expiry");return;}
+    jsize count=(*env)->GetArrayLength(env,groups);jlong *ids=(*env)->GetLongArrayElements(env,groups,NULL);
+    struct bucket_key key,next;union bpf_attr attr={.map_fd=fd,.next_key=(uint64_t)&next};
+    int result=bpf(BPF_MAP_GET_NEXT_KEY,&attr);
+    while(result==0) {
+        key=next;attr.key=(uint64_t)&key;
+        result=bpf(BPF_MAP_GET_NEXT_KEY,&attr);
+        if(!key.cgroup_id)continue;
+        int found=0;for(jsize i=0;i<count;i++)if((__u64)ids[i]==key.cgroup_id){found=1;break;}
+        if(!found) {union bpf_attr remove={.map_fd=fd,.key=(uint64_t)&key};if(bpf(BPF_MAP_DELETE_ELEM,&remove)<0&&errno!=ENOENT){fail(env,"Expire process counters");break;}}
+    }
+    if(result<0&&errno!=ENOENT)fail(env,"Enumerate process counters for expiry");
+    (*env)->ReleaseLongArrayElements(env,groups,ids,JNI_ABORT);close(fd);
 }

@@ -8,21 +8,19 @@ import dev.local.fuxicontrol.core.SplashHealth;
 import dev.local.fuxicontrol.core.SplashTargets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import android.net.LocalServerSocket;
-import android.net.LocalSocket;
+
+
 import dev.local.fuxicontrol.core.Policy;
 import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 /** Separate, unprivileged channel: an app can only read its own ad switch and report diagnostics. */
 public final class SplashChannel {
-    public static final String ADDRESS="qixu.splash.v1";
     private final Store store;
     private final PackageManager pm;
     private final Map<String,JSONObject> reports=new ConcurrentHashMap<>();
@@ -157,87 +155,47 @@ public final class SplashChannel {
         }
         return new JSONObject().put("apps",items);
     }
-    public void start() throws IOException {
-        Native.socketLabel(true);
-        LocalServerSocket server;
-        try {server=new LocalServerSocket(ADDRESS);} finally {Native.socketLabel(false);}
-        Semaphore slots=new Semaphore(16);
-        Thread accept=new Thread(()->{
-            try(server) {
-                while(true) {
-                    LocalSocket socket=server.accept();
-                    if(!slots.tryAcquire()) {socket.close();continue;}
-                    new Thread(()->{
-                        String watching=null;
-                        try(socket) {
-                            socket.setSoTimeout(1000);
-                            var reader=Wire.reader(socket);StringBuilder input=new StringBuilder();int ch;
-                            while((ch=reader.read())!=-1 && ch!='\n') {
-                                if(input.length()>=4096) throw new IllegalArgumentException("Ad request too large");
-                                input.append((char)ch);
-                            }
-                            JSONObject request=new JSONObject(input.toString());String name=request.getString("package");
-                            JSONObject info=identity(name);
-                            if(!info.getBoolean("installed") || info.getInt("uid")!=socket.getPeerCredentials().getUid())
-                                throw new SecurityException("Ad peer does not own package");
-                            switch(request.getString("command")) {
-                                case "watch" -> {
-                                    watching=name;
-                                    int pid=socket.getPeerCredentials().getPid();
-                                    beginWatch(name,info,pid);peers.put(name,pid);
-                                    Thread previous=watchers.put(name,Thread.currentThread());
-                                    if(previous!=null) previous.interrupt();
-                                    socket.setSoTimeout(0);
-                                    Thread writer=Thread.currentThread();
-                                    Thread disconnect=new Thread(()->{
-                                        try {
-                                            // The watch protocol has no further client messages. EOF must
-                                            // wake a writer even when the policy has not changed.
-                                            reader.read();
-                                        } catch(IOException e) {
-                                            android.util.Log.d("QixuSplash","Watch closed: "+name);
-                                        } finally {writer.interrupt();}
-                                    },"qixu-splash-disconnect");
-                                    disconnect.setDaemon(true);disconnect.start();
-                                    long revision=-1,epoch=-1;
-                                    while(!Thread.currentThread().isInterrupted()) {
-                                        JSONObject config;
-                                        synchronized(store) {
-                                            config=store.get();
-                                            if(revision==config.getLong("revision") && epoch==healthEpoch) {
-                                                store.wait();continue;
-                                            }
-                                        }
-                                        long nextEpoch=healthEpoch;
-                                        JSONObject state=snapshot(name,config);
-                                        if(!state.getBoolean("enabled")) disarm(name,info,pid);
-                                        Wire.send(socket,state);
-                                        revision=config.getLong("revision");epoch=nextEpoch;
-                                    }
-                                }
-                                case "report" -> {
-                                    int pid=socket.getPeerCredentials().getPid();
-                                    if(!Integer.valueOf(pid).equals(peers.get(name))) throw new SecurityException("Ad report must belong to the watching process");
-                                    String state=request.getString("state");Policy.oneOf(state,"ready","blocked","unsupported","error","healthy");
-                                    healthReport(name,info,pid,state);
-                                    String detail=request.optString("detail","");
-                                    if(detail.length()>240) throw new IllegalArgumentException("Ad detail too long");
-                                    if(!state.equals("healthy")) synchronized(reports) {
-                                        JSONObject old=reports.get(name);
-                                        reports.put(name,new JSONObject().put("state",state).put("detail",detail).put("installation",installation(info))
-                                            .put("at",System.currentTimeMillis()).put("blocked",(old==null?0:old.optLong("blocked"))+(state.equals("blocked")?1:0)));
-                                    }
-                                    Wire.send(socket,new JSONObject().put("ok",true));
-                                }
-                                default -> throw new IllegalArgumentException("Unknown ad command");
-                            }
-                        } catch(InterruptedException e) {Thread.currentThread().interrupt();}
-                        catch(Exception e) {android.util.Log.w("QixuSplash","Ad channel: "+e.getMessage());}
-                        finally {if(watching!=null) watchers.remove(watching,Thread.currentThread());slots.release();}
-                    },"qixu-splash-client").start();
+    public void serve(JSONObject request,int uid,int pid,java.io.PrintWriter output) throws Exception {
+        String name=request.getString("package");
+        JSONObject info=identity(name);
+        if(!info.getBoolean("installed") || info.getInt("uid")!=uid)
+            throw new SecurityException("Ad peer does not own package");
+        switch(request.getString("command")) {
+            case "watch" -> {
+                beginWatch(name,info,pid);peers.put(name,pid);
+                Thread previous=watchers.put(name,Thread.currentThread());
+                if(previous!=null) previous.interrupt();
+                try {
+                    long revision=-1,epoch=-1;
+                    while(!Thread.currentThread().isInterrupted()) {
+                        JSONObject config;
+                        synchronized(store) {
+                            config=store.get();
+                            if(revision==config.getLong("revision") && epoch==healthEpoch) {store.wait();continue;}
+                        }
+                        long nextEpoch=healthEpoch;
+                        JSONObject state=snapshot(name,config);
+                        if(!state.getBoolean("enabled")) disarm(name,info,pid);
+                        output.println(state);
+                        if(output.checkError()) return;
+                        revision=config.getLong("revision");epoch=nextEpoch;
+                    }
+                } finally {watchers.remove(name,Thread.currentThread());}
+            }
+            case "report" -> {
+                if(!Integer.valueOf(pid).equals(peers.get(name))) throw new SecurityException("Ad report must belong to the watching process");
+                String state=request.getString("state");Policy.oneOf(state,"ready","blocked","unsupported","error","healthy");
+                String detail=request.optString("detail","");
+                if(detail.length()>240) throw new IllegalArgumentException("Ad detail too long");
+                healthReport(name,info,pid,state);
+                if(!state.equals("healthy")) synchronized(reports) {
+                    JSONObject old=reports.get(name);
+                    reports.put(name,new JSONObject().put("state",state).put("detail",detail).put("installation",installation(info))
+                        .put("at",System.currentTimeMillis()).put("blocked",(old==null?0:old.optLong("blocked"))+(state.equals("blocked")?1:0)));
                 }
-            } catch(IOException e) {throw new java.io.UncheckedIOException(e);}
-        },"qixu-splash-server");
-        accept.setDaemon(true);accept.start();
+                output.println(new JSONObject().put("ok",true));
+            }
+            default -> throw new IllegalArgumentException("Unknown ad command");
+        }
     }
 }

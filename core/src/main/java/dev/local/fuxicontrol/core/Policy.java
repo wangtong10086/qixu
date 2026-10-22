@@ -6,12 +6,12 @@ import java.util.Set;
 
 /** Versioned desired policy. Runtime execution status is stored separately. */
 public final class Policy {
-    private static final Set<String> FIELDS = Set.of("autostart", "background", "cpuNice", "uclampMax",
+    private static final Set<String> FIELDS = Set.of("cpuQuota", "manualCleanup", "autostart", "background", "cpuNice", "uclampMax",
             "memoryHighMiB", "memoryMaxMiB", "uploadBps", "downloadBps", "burstBytes", "network",
-            "screenOffCleanup", "screenOffDelaySeconds", "services", "blockSplashAds", "permissions", "appOps", "protected", "resident", "cleanupOnTaskRemoved", "wakeLocks");
+            "processes", "screenOffCleanup", "screenOffDelaySeconds", "services", "blockSplashAds", "permissions", "appOps", "protected", "resident", "cleanupOnTaskRemoved", "wakeLocks");
     public static JSONObject initial() {
-        return new JSONObject().put("schema", 1).put("revision", 0).put("mode", "observe")
-                .put("defaults", new JSONObject().put("autostart", "deny").put("background", "balanced")
+        return new JSONObject().put("schema", 3).put("revision", 0).put("mode", "observe")
+                .put("defaults", new JSONObject().put("cpuQuota",CpuQuota.defaults()).put("manualCleanup",ManualCleanup.defaults()).put("autostart", "deny").put("background", "balanced")
                         .put("cpuNice", 5).put("uclampMax", 1024).put("memoryHighMiB", 0)
                         .put("memoryMaxMiB", 0).put("uploadBps", 0).put("downloadBps", 0)
                         .put("burstBytes", 65536).put("network", "allow")
@@ -20,13 +20,32 @@ public final class Policy {
                         .put("wakeLocks", new JSONArray()).put("cleanupOnTaskRemoved", false).put("resident",false))
                 .put("apps", new JSONObject()).put("rules", new JSONArray()).put("pushProxy",new JSONObject());
     }
+    public static JSONObject migrate(JSONObject input) {
+        JSONObject value=copy(input);
+        int schema=value.getInt("schema");
+        if(schema!=1 && schema!=2 && schema!=3) throw new IllegalArgumentException("Unsupported schema");
+        value.put("schema",3);
+        JSONObject defaults=value.getJSONObject("defaults");
+        if(!defaults.has("cpuQuota")) defaults.put("cpuQuota",CpuQuota.defaults());
+        if(!defaults.has("manualCleanup")) defaults.put("manualCleanup",ManualCleanup.defaults());
+        JSONObject profiles=value.optJSONObject("profiles");
+        if(profiles!=null) for(String id:Json.keys(profiles)) {
+            JSONObject entry=profiles.getJSONObject(id);
+            entry.put("config",migrate(entry.getJSONObject("config")));
+        }
+        validate(value);
+        return value;
+    }
     public static JSONObject copy(JSONObject value) { return new JSONObject(value.toString()); }
     public static void validatePatch(JSONObject patch) {
         for (String field : dev.local.fuxicontrol.core.Json.keys(patch)) {
             if (!FIELDS.contains(field)) throw new IllegalArgumentException("Unknown policy field: " + field);
             switch (field) {
+                case "cpuQuota" -> CpuQuota.validate(patch.getJSONObject(field));
+                case "manualCleanup" -> ManualCleanup.validate(patch.getJSONObject(field));
                 case "screenOffCleanup" -> oneOf(patch.getString(field),"off","cached","force-stop");
                 case "screenOffDelaySeconds" -> range(patch.getLong(field),10,86400,field);
+                case "processes" -> ProcessPolicy.validate(patch.getJSONObject(field));
                 case "services" -> {
                     JSONObject services=patch.getJSONObject(field);
                     for(String component:Json.keys(services)) {
@@ -65,9 +84,12 @@ public final class Policy {
     }
     public static void validate(JSONObject config) {
         Profiles.validate(config);
-        if (config.getInt("schema") != 1) throw new IllegalArgumentException("Unsupported schema");
+        if (config.getInt("schema") != 3) throw new IllegalArgumentException("Unsupported schema");
         oneOf(config.getString("mode"), "observe", "enforce", "disabled");
         validatePatch(config.getJSONObject("defaults"));
+        if(config.getJSONObject("defaults").optJSONObject("manualCleanup")!=null && config.getJSONObject("defaults").getJSONObject("manualCleanup").getString("mode").equals("force-stop"))
+            throw new IllegalArgumentException("强制停止只能逐应用启用");
+        if(config.getJSONObject("defaults").has("processes")) throw new IllegalArgumentException("进程只能逐应用配置");
         if(config.getJSONObject("defaults").optString("screenOffCleanup","off").equals("force-stop"))
             throw new IllegalArgumentException("强制停止只能逐应用启用");
         if(config.getJSONObject("defaults").has("services") && config.getJSONObject("defaults").getJSONObject("services").length()>0)
@@ -92,7 +114,7 @@ public final class Policy {
         for (int i = 0; i < config.getJSONArray("rules").length(); i++) Rules.validate(config.getJSONArray("rules").getJSONObject(i));
     }
     public static JSONObject effective(JSONObject config, String name, boolean protectedRole) {
-        JSONObject result = new JSONObject().put("screenOffCleanup","off").put("screenOffDelaySeconds",60).put("services",new JSONObject());
+        JSONObject result = new JSONObject().put("cpuQuota",CpuQuota.defaults()).put("manualCleanup",ManualCleanup.defaults()).put("screenOffCleanup","off").put("screenOffDelaySeconds",60).put("services",new JSONObject());
         for(String key:Json.keys(config.getJSONObject("defaults"))) result.put(key,config.getJSONObject("defaults").get(key));
         JSONObject sources = new JSONObject();
         for (String key : dev.local.fuxicontrol.core.Json.keys(result)) sources.put(key, "default");

@@ -35,6 +35,7 @@ jobs:
           cc -Wall -Wextra -Werror native/budget_test.c -o /tmp/qixu-budget-test
           /tmp/qixu-budget-test
           python3 -m compileall -q tools
+          python3 -m unittest discover -s tools -p test_cpu_kernel.py
           ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:assembleDebug :app:lintDebug :probe:assembleDebug :design-preview:assembleDebug
       - name: Upload test and lint reports
         if: always()

@@ -1,12 +1,6 @@
 #!/system/bin/sh
 set -eu
 BASE=/data/adb/fuxicontrol
-magiskpolicy --live 'attribute fuxicontrol_socket_type' \
-    'type fuxicontrol_socket fuxicontrol_socket_type' \
-    'typeattribute fuxicontrol_socket mlstrustedsubject' \
-    'allow magisk fuxicontrol_socket unix_stream_socket *' \
-    'allow system_server fuxicontrol_socket unix_stream_socket connectto' \
-    'allow appdomain fuxicontrol_socket unix_stream_socket connectto'
 rm -f "$BASE/service.stopped"
 if [ -f "$BASE/supervisor.pid" ]; then
     supervisor=$(cat "$BASE/supervisor.pid")

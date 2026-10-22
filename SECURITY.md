@@ -6,9 +6,9 @@ Report authentication bypasses, arbitrary code execution, unsafe restoration or 
 
 ## Boundaries
 
-- The root daemon authenticates UNIX peer credentials. UID 0 has full access; the manager requires its package UID and configured signing digest. UID 1000 is trusted for hook events, status and snapshots only.
+- The root daemon authenticates the UID/PID captured from each Binder transaction. UID 0 has full access; the manager requires its package UID and configured signing digest. UID 1000 is trusted for hook events, status and snapshots only.
 - Root and system compromise are outside this boundary. This is not a sandbox against other root applications.
-- The endpoint is a local Android abstract UNIX socket, not a TCP service.
+- A Direct Boot provider exposes Binder discovery; only UID 0 may register the controller. Possessing its Binder does not grant command access. Responses use anonymous pipes, with no listening socket or network dependency.
 - Config revisions prevent stale writes when the caller supplies `expectedRevision`. CLI scripts must use it for concurrent writes.
 - Source builds need their own signing identity. The maintainer's local signing key is not shipped.
 - Imported legacy automation is validated against supported templates and converted to typed actions; arbitrary MVEL/shell imports are not executed.
