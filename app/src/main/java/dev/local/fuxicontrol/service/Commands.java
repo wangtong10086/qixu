@@ -30,6 +30,33 @@ public final class Commands {
             case "cleanup.status" -> {return cleanup.status();}
             case "status" -> { return engine.status().put("revision",config.getLong("revision"))
                     .put("mode",config.getString("mode")).put("schema",config.getInt("schema")); }
+            case "cpu.topology" -> {return engine.cpuTopology();}
+            case "cpu.status" -> {return engine.cpuStatus(request.getString("package"));}
+            case "threads.list" -> {return resources.threads(request.getString("package"),request.getString("process"));}
+            case "scheduling.patch" -> {config.put("scheduling",dev.local.fuxicontrol.core.AffinityPolicy.merge(config.getJSONObject("scheduling"),request.getJSONObject("patch")));}
+            case "app.apply" -> {
+                String name=request.getString("package");Policy.packageName(name);
+                JSONObject apps=config.getJSONObject("apps"),old=apps.optJSONObject(name);
+                apps.put(name,dev.local.fuxicontrol.core.AffinityPolicy.merge(old==null?new JSONObject():old,request.getJSONObject("patch")));
+            }
+            case "app.unset" -> {
+                String name=request.getString("package"),field=request.getString("field");Policy.packageName(name);Policy.field(field);
+                JSONObject app=config.getJSONObject("apps").optJSONObject(name);if(app!=null)app.remove(field);
+            }
+            case "thread.policy.put", "thread.policy.remove" -> {
+                String name=request.getString("package"),process=request.getString("process");Policy.packageName(name);
+                JSONObject apps=config.getJSONObject("apps");if(!apps.has(name))apps.put(name,new JSONObject());
+                JSONObject app=apps.getJSONObject(name);if(!app.has("processes"))app.put("processes",new JSONObject());
+                JSONObject processes=app.getJSONObject("processes");if(!processes.has(process))processes.put(process,new JSONObject());
+                JSONObject rule=processes.getJSONObject(process);JSONArray old=rule.optJSONArray("threads"),next=new JSONArray();
+                JSONObject item=command.equals("thread.policy.put")?request.getJSONObject("rule"):null;
+                String id=item==null?request.getString("id"):item.getString("id");boolean replaced=false;
+                if(old!=null)for(int i=0;i<old.length();i++) {
+                    JSONObject current=old.getJSONObject(i);
+                    if(current.getString("id").equals(id)){if(item!=null)next.put(item);replaced=true;}else next.put(current);
+                }
+                if(item!=null&&!replaced)next.put(item);rule.put("threads",next);
+            }
             case "capabilities" -> { return engine.capabilities(); }
             case "apps" -> { return new JSONObject().put("apps",catalog.applications()); }
             case "apps.index" -> { return discovery.index(config,request.optString("query",""),request.optString("scope","all")); }
@@ -132,8 +159,11 @@ public final class Commands {
         }
         boolean preview=request.optBoolean("dryRun",false);
         engine.preflight(config);
+        JSONObject before=store.get();
         result=store.replace(config,preview);
         if(!preview) { audit.record(command,new JSONObject().put("revision",result.getLong("revision")));engine.reconcile();splash.reconcileScope(result); }
-        return new JSONObject().put("dryRun",preview).put("config",result);
+        JSONObject response=new JSONObject().put("dryRun",preview).put("changes",dev.local.fuxicontrol.core.ConfigDiff.between(before,config)).put("config",result);
+        if(preview)response.put("schedulingPreview",engine.schedulingPreview(config,request.optString("package",request.optString("previewPackage",""))));
+        return response;
     }
 }

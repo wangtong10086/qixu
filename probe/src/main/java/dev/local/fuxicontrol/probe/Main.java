@@ -6,6 +6,11 @@ import android.os.Bundle;
 import android.widget.TextView;
 
 public class Main extends Activity {
+    private android.content.ServiceConnection affinityConnection;
+    @Override public void onDestroy() {
+        if(affinityConnection!=null)unbindService(affinityConnection);
+        super.onDestroy();
+    }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);TextView text=new TextView(this);text.setText("Fuxi validation probe");setContentView(text);
         if(getIntent().getBooleanExtra("socket",false)) new Thread(()-> {
@@ -38,6 +43,14 @@ public class Main extends Activity {
             @Override public void onServiceDisconnected(android.content.ComponentName name) {}
         },BIND_AUTO_CREATE);
         if(getIntent().hasExtra("udp")) Datagrams.run(this,getIntent().getStringExtra("udp"),getIntent().getBooleanExtra("ipv6",false));
+        if(getIntent().getBooleanExtra("affinity",false)) {
+            Intent service=new Intent(this,AffinityWorker.class);startService(service);
+            affinityConnection=new android.content.ServiceConnection() {
+                @Override public void onServiceConnected(android.content.ComponentName name,android.os.IBinder binder) {}
+                @Override public void onServiceDisconnected(android.content.ComponentName name) {}
+            };
+            bindService(service,affinityConnection,BIND_AUTO_CREATE|BIND_IMPORTANT);
+        }
         if(getIntent().getBooleanExtra("resources",false))startService(new Intent(this,ResourceWorker.class));
         if(getIntent().hasExtra("test")) startService(new Intent(this,NetworkService.class).putExtras(getIntent()));
     }

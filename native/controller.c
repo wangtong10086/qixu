@@ -131,3 +131,32 @@ JNIEXPORT void JNICALL Java_dev_local_fuxicontrol_service_Native_networkPrune(JN
     if(result<0&&errno!=ENOENT)fail(env,"Enumerate process counters for expiry");
     (*env)->ReleaseLongArrayElements(env,groups,ids,JNI_ABORT);close(fd);
 }
+
+/* Dynamic masks also work on kernels whose configured NR_CPUS exceeds CPU_SETSIZE. */
+#include <sched.h>
+static void affinity_error(JNIEnv *env,const char *operation) {
+    int error=errno;
+    jclass cls=(*env)->FindClass(env,"android/system/ErrnoException");
+    jmethodID ctor=(*env)->GetMethodID(env,cls,"<init>","(Ljava/lang/String;I)V");
+    jobject ex=(*env)->NewObject(env,cls,ctor,(*env)->NewStringUTF(env,operation),error);
+    (*env)->Throw(env,ex);
+}
+JNIEXPORT jintArray JNICALL Java_dev_local_fuxicontrol_service_Native_getAffinity(JNIEnv *env,jclass type,jint tid) {
+    size_t size=CPU_ALLOC_SIZE(4096);cpu_set_t *mask=CPU_ALLOC(4096);
+    if(!mask){affinity_error(env,"allocate affinity");return NULL;}
+    CPU_ZERO_S(size,mask);
+    if(sched_getaffinity(tid,size,mask)<0){free(mask);affinity_error(env,"sched_getaffinity");return NULL;}
+    jint values[4096];int count=0;
+    for(int cpu=0;cpu<4096;cpu++)if(CPU_ISSET_S(cpu,size,mask))values[count++]=cpu;
+    free(mask);jintArray result=(*env)->NewIntArray(env,count);(*env)->SetIntArrayRegion(env,result,0,count,values);return result;
+}
+JNIEXPORT void JNICALL Java_dev_local_fuxicontrol_service_Native_setAffinity(JNIEnv *env,jclass type,jint tid,jintArray cpus) {
+    size_t size=CPU_ALLOC_SIZE(4096);cpu_set_t *mask=CPU_ALLOC(4096);
+    if(!mask){affinity_error(env,"allocate affinity");return;}
+    CPU_ZERO_S(size,mask);
+    jsize count=(*env)->GetArrayLength(env,cpus);jint *values=(*env)->GetIntArrayElements(env,cpus,NULL);
+    for(int i=0;i<count;i++)CPU_SET_S(values[i],size,mask);
+    (*env)->ReleaseIntArrayElements(env,cpus,values,JNI_ABORT);
+    int result=sched_setaffinity(tid,size,mask),error=errno;free(mask);errno=error;
+    if(result<0)affinity_error(env,"sched_setaffinity");
+}

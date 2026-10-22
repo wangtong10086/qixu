@@ -709,6 +709,9 @@ private fun Controller() {
                                     report = it.toString(); navigate("后台服务")
                                 }
                             }
+                            Entry("高级核心调度", if(dirty) "请先保存本页修改" else "应用、进程、线程的前后台核心规则", enabled = writable && !dirty) {
+                                context.startActivity(Intent(context,SchedulingActivity::class.java).putExtra("package",if(page=="默认模板") "" else packageName))
+                            }
                             key(page, packageName, revision) {
                                 PolicyForm(draft, inherited, page == "默认模板", writable, packageName) {
                                     draft = it

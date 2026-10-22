@@ -7,6 +7,7 @@
 | --- | --- |
 | `autostart` | `allow` / `deny`；禁止后台冷启动、接收器、服务与作业，不阻止用户打开活动 |
 | `background` | `normal` / `balanced` / `restricted`；restricted 使用 Android UID idle、待机桶和安全的缓存冻结 |
+| `cpuAffinity` | 前后台核心选择，支持 system/little/big/prime/核心列表；见 [高级调度](scheduling.md) |
 | `cpuNice` | 0 不调整；1–19 为后台线程优先级下限，不是 CPU 百分比 |
 | `cpuQuota` | `periodUs`、`foregroundUs`、`backgroundUs`（微秒）；0 阶段额度为关闭，`allowProtected` 显式允许关键应用配额；见 [CPU 配额](cpu-quota.md) |
 | `manualCleanup` | 独立的一键清理规则，默认仅回收缓存；见 [控制协议](protocol.md#manual-cleanup-and-cpu-quota-schema-3) |
@@ -62,3 +63,7 @@ adb shell su -c 'sh /data/adb/fuxicontrol/recover.sh'
 隐私和待机设置，并撤下自身网络程序。其他模块和 Thanox 不受此脚本修改。重启后卸载系统钩子。
 重新启用需要启动本服务、恢复本应用的 Vector 激活及 system/0 作用域，然后重启。
 私有签名目录必须独立备份，丢失签名将影响以后覆盖升级。
+
+## 核心调度的独立上限
+
+方案级 `scheduling.backgroundSmallCoresOnly` 与应用保护、活动任务豁免独立。开启后，后台音乐、导航、下载和受保护应用也只用小核；不会因此取消它们的配额／内存／清理豁免。前台默认交给系统，允许手动选核。单应用文件操作见 [CLI 手册](cli.md)。

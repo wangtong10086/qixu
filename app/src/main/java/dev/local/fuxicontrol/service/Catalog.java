@@ -68,7 +68,7 @@ public final class Catalog {
         // Resources, runtime grants and UID AppOps affect all shared-UID siblings.
         java.util.Map<Integer,JSONObject> uidOverrides=new java.util.HashMap<>();
         java.util.Map<Integer,JSONObject> uidSources=new java.util.HashMap<>();
-        Set<String> resourceFields=Set.of("cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network","permissions","appOps");
+        Set<String> resourceFields=Set.of("cpuAffinity","cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network","permissions","appOps");
         for(int i=0;i<apps.length();i++) {
             JSONObject app=apps.getJSONObject(i);String name=app.getString("package");int uid=app.getInt("uid");
             JSONObject overrides=config.getJSONObject("apps").optJSONObject(name);
@@ -76,9 +76,20 @@ public final class Catalog {
             JSONObject values=uidOverrides.computeIfAbsent(uid,k->new JSONObject());
             JSONObject sources=uidSources.computeIfAbsent(uid,k->new JSONObject());
             for(String field:resourceFields) if(overrides.has(field)) {
-                if(values.has(field) && !values.get(field).toString().equals(overrides.get(field).toString()))
-                    throw new IllegalArgumentException("Conflicting shared UID setting: "+name+" / "+field);
-                values.put(field,overrides.get(field));sources.put(field,"shared-uid:"+name);
+                if(field.equals("cpuAffinity")) {
+                    JSONObject merged=values.optJSONObject(field);if(merged==null)merged=new JSONObject();
+                    JSONObject phases=overrides.getJSONObject(field);
+                    for(String phase:dev.local.fuxicontrol.core.Json.keys(phases)) {
+                        if(merged.has(phase)&&!merged.getString(phase).equals(phases.getString(phase)))throw new IllegalArgumentException("Conflicting shared UID affinity: "+name+" / "+phase);
+                        merged.put(phase,phases.getString(phase));sources.put(field+"."+phase,"shared-uid:"+name);
+                    }
+                    values.put(field,merged);
+                } else {
+                    if(values.has(field) && !values.get(field).toString().equals(overrides.get(field).toString()))
+                        throw new IllegalArgumentException("Conflicting shared UID setting: "+name+" / "+field);
+                    values.put(field,overrides.get(field));
+                }
+                sources.put(field,"shared-uid:"+name);
             }
         }
         for(int i=0;i<apps.length();i++) {
@@ -87,7 +98,16 @@ public final class Catalog {
             if(overrides==null) continue;
             JSONObject p=effective.getJSONObject(app.getString("package"));
             for(String field:dev.local.fuxicontrol.core.Json.keys(overrides)) {
-                p.put(field,overrides.get(field));p.getJSONObject("sources").put(field,uidSources.get(uid).get(field));
+                if(field.equals("cpuAffinity")) {
+                    JSONObject base=dev.local.fuxicontrol.core.AffinityPolicy.merge(dev.local.fuxicontrol.core.AffinityPolicy.defaults(),config.getJSONObject("defaults").getJSONObject("cpuAffinity"));
+                    p.put(field,dev.local.fuxicontrol.core.AffinityPolicy.merge(base,overrides.getJSONObject(field)));
+                    for(String phase:dev.local.fuxicontrol.core.Json.keys(overrides.getJSONObject(field))) {
+                        String source=uidSources.get(uid).getString(field+"."+phase);
+                        p.getJSONObject("sources").put(field+"."+phase,source.equals("shared-uid:"+app.getString("package"))?"app":source);
+                    }
+                } else p.put(field,overrides.get(field));
+                String source=uidSources.get(uid).getString(field);
+                p.getJSONObject("sources").put(field,source.equals("shared-uid:"+app.getString("package"))?"app":source);
             }
         }
         JSONObject proxies=new JSONObject();

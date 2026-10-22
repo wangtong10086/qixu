@@ -5,18 +5,20 @@ import java.util.Set;
 
 /** Process budgets refine the UID budget; they never duplicate it. */
 public final class ProcessPolicy {
-    public static final Set<String> FIELDS=Set.of("cpuQuota","cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network");
+    public static final Set<String> FIELDS=Set.of("cpuAffinity","cpuQuota","cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network");
     public static void validate(JSONObject rules) {
         for(String name:Json.keys(rules)) {
             if(name.isBlank() || name.length()>256 || name.chars().anyMatch(Character::isISOControl))
                 throw new IllegalArgumentException("Expected full process name");
             JSONObject rule=rules.getJSONObject(name);
             for(String key:Json.keys(rule)) {
+                if(key.equals("threads")){AffinityPolicy.threads(rule.getJSONArray(key));continue;}
                 if(key.equals("exemptActiveTasks")) {rule.getBoolean(key);continue;}
                 Policy.oneOf(key,"foreground","background");
                 JSONObject values=rule.getJSONObject(key);
                 for(String field:Json.keys(values)) if(!FIELDS.contains(field)) throw new IllegalArgumentException("Unknown process resource: "+field);
-                Policy.validatePatch(values);
+                JSONObject resources=Policy.copy(values);resources.remove("cpuAffinity");Policy.validatePatch(resources);
+                if(values.has("cpuAffinity"))AffinityPolicy.selector(values.getString("cpuAffinity"));
                 if(values.optLong("memoryMaxMiB",0)>0 && values.optLong("memoryHighMiB",0)>values.getLong("memoryMaxMiB"))
                     throw new IllegalArgumentException("内存回收阈值不能超过硬上限");
             }

@@ -22,7 +22,7 @@ Requests are capped at 262144 UTF-16 code units. There are 48 active slots, at m
 ```
 
 ```json
-{"ok":true,"result":{"service":true,"mode":"observe","revision":4,"schema":3}}
+{"ok":true,"result":{"service":true,"mode":"observe","revision":4,"schema":4}}
 ```
 
 The sample result is abbreviated. Command execution errors use:
@@ -76,7 +76,7 @@ Config persistence and runtime execution are separate: runtime reconciliation ca
 
 ## Policy schema
 
-Root fields: `schema:3`, `revision`, `mode`, `defaults`, `apps`, `rules`, `pushProxy`. The service owns persisted revision increments. See [policy.md](policy.md) for fields and units. See [examples](../examples/README.md) for synthetic values.
+Root fields: `schema:4`, `revision`, `mode`, `defaults`, `apps`, `rules`, `pushProxy`, `scheduling`. The service owns persisted revision increments. See [policy.md](policy.md) for fields and units. See [examples](../examples/README.md) for synthetic values.
 
 Rules contain `id`, `enabled`, `event` (`foreground-left` or `push-arrived`), `package`, `action` (`record` or `kill-cached`) and `delayMs` (0–86400000).
 
@@ -90,7 +90,7 @@ Push proxy entries are keyed by package. Supported boolean fields are `enabled`,
 
 ## Compatibility
 
-The historical package ID and data directory are retained for existing installations. Binder discovery uses `dev.local.fuxicontrol.ipc` with protocol 1; policy schema 3 migrates schema 1/2 and their named profiles before use. New optional fields must not silently change the meaning of existing values. Breaking changes require an explicit schema/protocol migration and updated fixtures. Root storage paths and the historical Fuxi package ID are compatibility identifiers, not the current product name.
+The historical package ID and data directory are retained for existing installations. Binder discovery uses `dev.local.fuxicontrol.ipc` with protocol 1; policy schema 4 migrates schema 1/2/3 and their named profiles before use. New optional fields must not silently change the meaning of existing values. Breaking changes require an explicit schema/protocol migration and updated fixtures. Root storage paths and the historical Fuxi package ID are compatibility identifiers, not the current product name.
 
 ## Application discovery (0.3)
 
@@ -177,3 +177,22 @@ The existing `config.get` / `config.replace` commands support full backup and re
 `cpuQuota` accepts optional boolean `allowProtected` (default false). Explicitly enabling it permits the UID budget despite protected/resident cleanup status; startup, network and active-task exemptions are unchanged. Shared-UID applications must agree on this flag and all quota values.
 
 The v1 backend reports `backend: cgroup-v1-uid`, `actual: "quota_us period_us"`, `cpuStat`, and `reassignedThreads`. `waiting-process` means no process exists to bind; isolated UIDs report `pending-layout`. Foreground/off restores owned membership. Android migration is event-driven with a five-second reconciliation interval; `applied` describes the observed kernel group, not a zero-latency migration guarantee. See [CPU quota](cpu-quota.md) for measured low-budget overhead.
+
+## 0.7 核心调度与文件配置接口
+
+当前策略为 schema 4，传输协议仍为 1。新增接口均复用 root／签名管理器授权和现有版本校验。
+
+| command | 请求字段 | 返回／行为 |
+| --- | --- | --- |
+| `cpu.topology` | 无 | possible、online、cores 容量和频率、groups |
+| `cpu.status` | package | 当前阶段、方案上限、线程匹配来源与内核读回 |
+| `threads.list` | package、process | 当前线程、名称、TID、身份、CPU 区间比例及最近核心 |
+| `scheduling.patch` | patch | 合并方案级 backgroundSmallCoresOnly |
+| `app.apply` | package、patch | 对象递归合并，数组替换；不改变 app.patch 的浅合并合同 |
+| `app.unset` | package、field | 删除应用顶层覆盖 |
+| `thread.policy.put` | package、process、rule | 按 id 替换／追加有序线程规则 |
+| `thread.policy.remove` | package、process、id | 删除指定规则 |
+
+写入返回额外的 `changes` 数组：path 是 JSON Pointer，before／after 是原值和新值。dryRun 额外返回 `schedulingPreview`，包含预检应用数、当前可见线程数、受限／无交集数量及匹配来源计数；这是预检采样，不执行绑核。配置保存与内核生效仍然分开。CLI 自动添加读取时版本，显式 RPC 维持原来的可选版本语义。
+
+`scheduling` 随命名方案保存，`cpuAffinity` 按阶段继承，线程字段与恢复语义见 [调度指南](scheduling.md)。完整文件、ADB 和冲突处理范例见 [CLI 手册](cli.md)。

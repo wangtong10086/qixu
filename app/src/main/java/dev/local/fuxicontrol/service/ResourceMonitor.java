@@ -252,5 +252,41 @@ public final class ResourceMonitor {
         details.keySet().removeIf(id->!previous.containsKey(id));
         return new JSONObject().put("processes",result);
     }
+    private final Map<String,long[]> threadSamples=new HashMap<>();
+    public synchronized JSONObject threads(String name,String process) throws Exception {
+        dev.local.fuxicontrol.core.Policy.packageName(name);
+        // Thread viewers need the same live process inventory as the resource page.
+        visibleUntil=SystemClock.elapsedRealtime()+10000;
+        JSONObject app=snapshot.optJSONObject("apps")==null?null:snapshot.getJSONObject("apps").optJSONObject(name);
+        JSONArray output=new JSONArray();long now=SystemClock.elapsedRealtime();
+        JSONObject runtime=engine.cpuStatus(name);JSONArray applied=runtime.getJSONArray("threads");
+        if(app!=null)for(int i=0;i<app.getJSONArray("processes").length();i++) {
+            JSONObject member=app.getJSONArray("processes").getJSONObject(i);
+            if(!member.getString("name").equals(process))continue;
+            int pid=member.getInt("pid");Path proc=Path.of("/proc/"+pid);
+            try {
+                if(!AffinityController.identity(proc).equals(Long.toString(member.getLong("startTicks"))))continue;
+                try(var tasks=Files.list(proc.resolve("task"))) {
+                    for(Path task:tasks.toList())try {
+                        int tid=Integer.parseInt(task.getFileName().toString());String raw=Text.read(task.resolve("stat"));
+                        ResourceSample stat=ResourceSample.parse(raw,pageSize);String key=member.getString("identity")+":"+tid+":"+stat.start();
+                        long[] before=threadSamples.put(key,new long[]{stat.ticks(),now});
+                        JSONObject value=new JSONObject().put("pid",pid).put("tid",tid).put("identity",key).put("name",Text.read(task.resolve("comm")).stripTrailing()).put("main",pid==tid)
+                            .put("allowed",new JSONArray(Native.getAffinity(tid))).put("lastCpu",Integer.parseInt(raw.substring(raw.lastIndexOf(')')+2).trim().split(" +")[36]));
+                        double cpu=before==null?Double.NaN:ResourceSample.processCpu(stat.ticks(),before[0],now-before[1],ticksPerSecond,cpuCount);
+                        value.put("cpuPercent",Double.isFinite(cpu)?cpu:JSONObject.NULL);
+                        for(int j=0;j<applied.length();j++) {
+                            JSONObject observed=applied.getJSONObject(j);
+                            if(observed.getInt("tid")==tid&&observed.getString("startTicks").equals(Long.toString(stat.start()))) {value.put("scheduling",observed);break;}
+                        }
+                        if(AffinityController.identity(task).equals(Long.toString(stat.start())))output.put(value);
+                    } catch(NoSuchFileException exited) { /* thread exited */ }
+                      catch(android.system.ErrnoException exited){if(exited.errno!=android.system.OsConstants.ESRCH)throw exited;}
+                }
+            } catch(NoSuchFileException exited) { /* process exited */ }
+        }
+        threadSamples.entrySet().removeIf(entry->now-entry.getValue()[1]>60000);
+        return new JSONObject().put("package",name).put("process",process).put("threads",output).put("capturedAtElapsedMs",now).put("runtime",runtime);
+    }
     public JSONObject clear() throws JSONException {return storage.clear();}
 }

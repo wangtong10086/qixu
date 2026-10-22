@@ -32,6 +32,7 @@ public final class RuntimeEngine {
     private final Map<Integer,Integer> owners=new HashMap<>();
     private final Map<Integer,Long> backgroundSince=new HashMap<>();
     private final Set<Integer> foreground=new HashSet<>();
+    private final Set<Integer> affinityForeground=new HashSet<>();
     private final Set<Integer> activeTasks=new HashSet<>();
     private final Map<String,Boolean> hooks=new HashMap<>();
     private final java.util.concurrent.ScheduledThreadPoolExecutor tasks=new java.util.concurrent.ScheduledThreadPoolExecutor(1);
@@ -58,8 +59,43 @@ public final class RuntimeEngine {
                 .put("hookRevision",hookRevision).put("lastError",lastError).put("foregroundUids",new JSONArray(foreground)).put("activeTaskUids",new JSONArray(activeTasks)).put("applications",runtime.size()).put("uptimeMs",android.os.SystemClock.elapsedRealtime())
                 .put("screenCleanup",new JSONObject().put("screenKnown",screenKnown).put("interactive",power.isInteractive()).put("pending",new JSONArray(pendingScreenCleanup.keySet())));
     }
+    private void refreshAffinityForeground() throws Exception {
+        // Persistent apps (state 0) are protected elsewhere, but are not a visible UI.
+        Object activity=Class.forName("android.app.ActivityManager").getMethod("getService").invoke(null);
+        var method=Class.forName("android.app.IActivityManager").getMethod("getUidProcessState",int.class,String.class);
+        affinityForeground.clear();
+        for(int uid:foreground) {
+            int state=(int)method.invoke(activity,uid,"android");
+            if(dev.local.fuxicontrol.core.AffinityPolicy.isForeground(state))affinityForeground.add(uid);
+        }
+    }
+    public JSONObject cpuTopology() throws Exception {return resources.affinity.topology.json();}
+    public synchronized JSONObject cpuStatus(String name) throws Exception {
+        JSONObject config=store.get(),app=catalog.snapshot(config).getJSONObject("effective").getJSONObject(name);
+        int uid=app.getInt("uid");org.json.JSONArray threads=new org.json.JSONArray();
+        for(int id:new java.util.HashSet<>(owners.keySet()))if(owners.get(id)==uid)for(int i=0;i<resources.affinity.states(id).length();i++)threads.put(resources.affinity.states(id).get(i));
+        if(!owners.containsKey(uid))for(int i=0;i<resources.affinity.states(uid).length();i++)threads.put(resources.affinity.states(uid).get(i));
+        return new JSONObject().put("package",name).put("revision",config.getLong("revision")).put("mode",config.getString("mode")).put("scheduling",config.getJSONObject("scheduling")).put("cpuAffinity",app.getJSONObject("cpuAffinity")).put("phase",affinityForeground.contains(uid)?"foreground":"background").put("threads",threads).put("state",threads.length()==0?(resources.affinity.processCount(uid)==0?"waiting-process":"system"):"sampled");
+    }
+    public synchronized JSONObject schedulingPreview(JSONObject config,String filter) throws Exception {
+        JSONObject effective=catalog.snapshot(config).getJSONObject("effective"),results=new JSONObject();
+        resources.scanProcesses();refreshAffinityForeground();boolean ceiling=config.getJSONObject("scheduling").getBoolean("backgroundSmallCoresOnly");
+        var combined=combinedProcessRules(effective);
+        for(String pkg:dev.local.fuxicontrol.core.Json.keys(effective)) {
+            if(!filter.isEmpty()&&!pkg.equals(filter))continue;
+            JSONObject app=effective.getJSONObject(pkg);int uid=app.getInt("uid");app.put("processes",combined.get(uid));
+            JSONObject result=resources.affinityPreview(uid,app,affinityForeground.contains(uid),ceiling);
+            for(var owner:owners.entrySet())if(owner.getValue()==uid&&owner.getKey()!=uid) {
+                JSONObject extra=resources.affinityPreview(owner.getKey(),app,affinityForeground.contains(uid),ceiling);
+                for(String key:java.util.List.of("threads","restricted","blocked"))result.put(key,result.getInt(key)+extra.getInt(key));
+                JSONObject matches=extra.getJSONObject("matches");for(String key:dev.local.fuxicontrol.core.Json.keys(matches))result.getJSONObject("matches").put(key,result.getJSONObject("matches").optInt(key)+matches.getInt(key));
+            }
+            results.put(pkg,result);
+        }
+        return new JSONObject().put("applications",results.length()).put("apps",results).put("capturedAtElapsedMs",android.os.SystemClock.elapsedRealtime());
+    }
     public JSONObject capabilities() throws org.json.JSONException {
-        return new JSONObject().put("processCpu",true).put("resourceHistory",true).put("processMemory",Files.exists(Path.of("/sys/fs/cgroup/apps/memory.high"))).put("processNetwork",Files.exists(Path.of("/sys/fs/bpf/fuxicontrol/process_limits"))).put("androidSdk",android.os.Build.VERSION.SDK_INT).put("requiredVectorApi",102)
+        return new JSONObject().put("cpuAffinity",true).put("threadAffinity",true).put("processCpu",true).put("resourceHistory",true).put("processMemory",Files.exists(Path.of("/sys/fs/cgroup/apps/memory.high"))).put("processNetwork",Files.exists(Path.of("/sys/fs/bpf/fuxicontrol/process_limits"))).put("androidSdk",android.os.Build.VERSION.SDK_INT).put("requiredVectorApi",102)
                 .put("memoryHigh",Files.exists(Path.of("/sys/fs/cgroup/apps/memory.high")))
                 .put("memoryMax",Files.exists(Path.of("/sys/fs/cgroup/apps/memory.max")))
                 .put("cpuBandwidthQuota",V1CpuQuota.supported()||Files.exists(Path.of("/sys/fs/cgroup/apps/cpu.max"))).put("cpuQuotaBackend",V1CpuQuota.supported()?"cgroup-v1-uid":"cgroup-v2-existing-uid-tree").put("uclamp",Files.exists(Path.of("/dev/cpuctl/background/cpu.uclamp.max")))
@@ -120,7 +156,7 @@ public final class RuntimeEngine {
         if(!enforce) {resources.restoreAll();Native.networkClear();}
         if(enforce) {
             for(var entry:owners.entrySet()) Native.networkAlias(entry.getKey(),entry.getValue());
-            resources.scanProcesses();resources.beginProcesses();
+            resources.scanProcesses();resources.beginProcesses();refreshAffinityForeground();
         }
         Set<Integer> playing=enforce?audio.activeUids():Set.of();
         var processPolicies=combinedProcessRules(effective);
@@ -136,9 +172,11 @@ public final class RuntimeEngine {
                         activeTasks.contains(uid)||playing.contains(uid)||(quotaProtected.contains(uid)&&!p.getJSONObject("cpuQuota").optBoolean("allowProtected",false)),
                         owners.entrySet().stream().anyMatch(entry->entry.getValue()==uid && entry.getKey()!=uid)));
                 resources.memory(uid,active?0:p.getLong("memoryHighMiB"),active?0:p.getLong("memoryMaxMiB"));
+                resources.affinity(uid,p,affinityForeground.contains(uid),config.getJSONObject("scheduling").getBoolean("backgroundSmallCoresOnly"));
                 resources.processRules(uid,p,foreground.contains(uid),activeTasks.contains(uid)||playing.contains(uid),quotaProtected.contains(uid));
                 for(var owner:owners.entrySet()) if(owner.getValue()==uid && owner.getKey()!=uid) {
                     resources.memory(owner.getKey(),active?0:p.getLong("memoryHighMiB"),active?0:p.getLong("memoryMaxMiB"));
+                    resources.affinity(owner.getKey(),p,affinityForeground.contains(uid),config.getJSONObject("scheduling").getBoolean("backgroundSmallCoresOnly"));
                     resources.processRules(owner.getKey(),p,foreground.contains(uid),activeTasks.contains(uid)||playing.contains(uid),quotaProtected.contains(uid));
                 }
                 int deny=p.getString("network").equals("deny") || (p.getString("network").equals("background-deny")&&!active)?3:0;
@@ -174,6 +212,7 @@ public final class RuntimeEngine {
         return combined;
     }
     public synchronized void preflight(JSONObject config) throws Exception {
+        resources.affinity.preflight(config);
         dev.local.fuxicontrol.core.Policy.validate(config);
         JSONObject effective=catalog.snapshot(config).getJSONObject("effective");
         privacy.validate(config.getJSONObject("apps"));
@@ -185,7 +224,7 @@ public final class RuntimeEngine {
         for(String name:dev.local.fuxicontrol.core.Json.keys(effective)) {
             JSONObject p=effective.getJSONObject(name);
             JSONObject uidPolicy=new JSONObject();
-            for(String field:new String[]{"cpuQuota","manualCleanup","cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network","permissions","appOps"})
+            for(String field:new String[]{"cpuAffinity","cpuQuota","manualCleanup","cpuNice","uclampMax","memoryHighMiB","memoryMaxMiB","uploadBps","downloadBps","burstBytes","network","permissions","appOps"})
                 uidPolicy.put(field,p.get(field));
             String encoded=uidPolicy.toString(),previous=shared.putIfAbsent(p.getInt("uid"),encoded);
             if(previous!=null && !previous.equals(encoded)) throw new IllegalArgumentException("Conflicting shared UID resource policy: "+name);

@@ -1,0 +1,6 @@
+{
+  "id": "worker-pool",
+  "match": {"type": "glob", "name": "worker-*"},
+  "foreground": {"cpuAffinity": "little"},
+  "background": {"cpuAffinity": "little"}
+}

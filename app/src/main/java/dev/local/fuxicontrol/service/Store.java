@@ -15,7 +15,7 @@ public final class Store {
         Files.createDirectories(directory);
         Path file = directory.resolve("policy.json");
         policy = Files.exists(file) ? new JSONObject(Text.read(file)) : Policy.initial();
-        if(policy.getInt("schema")<3) {
+        if(policy.getInt("schema")<4) {
             Path backup=directory.resolve("policy.schema"+policy.getInt("schema")+".backup.json");
             if(!Files.exists(backup)) atomic(backup,policy.toString(2));
             policy=Policy.migrate(policy);

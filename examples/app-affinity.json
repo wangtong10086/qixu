@@ -1,0 +1,11 @@
+{
+  "cpuAffinity": {"foreground": "system", "background": "little"},
+  "processes": {
+    "com.example.app": {
+      "threads": [
+        {"id": "render", "match": {"type": "exact", "name": "RenderThread"}, "foreground": {"cpuAffinity": "big"}}
+      ]
+    },
+    "com.example.app:worker": {"foreground": {"cpuAffinity": "little"}, "background": {"cpuAffinity": "0-1"}}
+  }
+}

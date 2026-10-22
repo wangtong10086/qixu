@@ -210,6 +210,7 @@ private fun normalizedLimits(value:JSONObject):JSONObject {
                         },label={Text(tab)})}
                     }
                 }
+                if(process.isNotEmpty())item {OutlinedButton(enabled=draft==original,onClick={context.startActivity(Intent(context,SchedulingActivity::class.java).putExtra("package",pkg).putExtra("process",process))}){Text("线程与核心调度")}}
                 if(process.isNotEmpty())item {Row {listOf("资源","限制").forEach{tab->FilterChip(processTab==tab,{processTab=tab},label={Text(tab)})}}}
                 if((section!="进程" || process.isNotEmpty() || pkg.isEmpty()) && (process.isEmpty() || processTab=="资源")) {
                     item {Row {listOf(0 to "实时",1 to "24 小时",7 to "七天").forEach{(days,name)->FilterChip(span==days,{span=days},label={Text(name)})}}}

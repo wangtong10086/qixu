@@ -7,8 +7,8 @@ public class ProcessPolicyTest {
         JSONObject old=Policy.initial().put("schema",1).put("revision",42);
         Profiles.create(old,"另一方案");
         JSONObject next=Policy.migrate(old);
-        assertEquals(3,next.getInt("schema"));assertEquals(42,next.getInt("revision"));
-        for(String id:Json.keys(next.getJSONObject("profiles"))) assertEquals(3,next.getJSONObject("profiles").getJSONObject(id).getJSONObject("config").getInt("schema"));
+        assertEquals(4,next.getInt("schema"));assertEquals(42,next.getInt("revision"));
+        for(String id:Json.keys(next.getJSONObject("profiles"))) assertEquals(4,next.getJSONObject("profiles").getJSONObject(id).getJSONObject("config").getInt("schema"));
         assertEquals(1,old.getInt("schema"));
     }
     @Test public void separateStagesKeepUidBudgetsShared() {

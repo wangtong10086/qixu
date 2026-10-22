@@ -13,8 +13,9 @@ public final class ResourceController {
     private final JSONObject journal;
     private final String bootId;
     private final V1CpuQuota v1;
+    final AffinityController affinity;
     public ResourceController(Path root) throws Exception {
-        v1=new V1CpuQuota(root);
+        v1=new V1CpuQuota(root);affinity=new AffinityController(root);
         journalFile=root.resolve("resources.json");
         bootId=Text.read(Path.of("/proc/sys/kernel/random/boot_id")).trim();
         JSONObject saved=Files.exists(journalFile)?new JSONObject(Text.read(journalFile)):new JSONObject();
@@ -107,12 +108,17 @@ public final class ResourceController {
         }
     }
     private final Set<Long> currentNetworks=new HashSet<>();
-    public synchronized void beginProcesses() {currentNetworks.clear();}
+    public synchronized void beginProcesses() throws org.json.JSONException {currentNetworks.clear();affinity.begin();}
     public synchronized void finishProcesses() throws Exception {
+        affinity.finish();
         for(String key:new HashSet<>(dev.local.fuxicontrol.core.Json.keys(journal))) if(key.startsWith("network:")) {
             long id=Long.parseLong(key.substring(8));
             if(!currentNetworks.contains(id)) {Native.processNetworkApply(id,0,0,65536,0);journal.remove(key);}
         }
+    }
+    public synchronized JSONObject affinityPreview(int uid,JSONObject app,boolean foreground,boolean ceiling) throws Exception {return affinity.preview(processes.getOrDefault(uid,java.util.List.of()),app,foreground,ceiling);}
+    public synchronized void affinity(int uid,JSONObject app,boolean foreground,boolean ceiling) throws Exception {
+        affinity.apply(uid,processes.getOrDefault(uid,java.util.List.of()),app,foreground,ceiling);
     }
     public synchronized void processRules(int uid,JSONObject policy,boolean foreground,boolean activity,boolean quotaProtected) throws Exception {
         JSONObject rules=policy.optJSONObject("processes");

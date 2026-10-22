@@ -5,6 +5,7 @@
     <application android:label="栖序" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/AppTheme"
         android:allowBackup="false" android:supportsRtl="true" android:extractNativeLibs="true">
         <provider android:name=".service.BrokerProvider" android:authorities="dev.local.fuxicontrol.ipc" android:exported="true" android:directBootAware="true" android:process=":ipc" />
+        <activity android:name=".ui.SchedulingActivity" android:exported="false" />
         <activity android:name=".ui.ResourceActivity" android:exported="false" />
         <activity android:name=".ui.MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" />

@@ -1,16 +1,32 @@
 {
-  "schema": 3,
+  "schema": 4,
   "revision": 0,
   "mode": "observe",
   "defaults": {
-    "autostart": "deny", "background": "balanced",
-    "cpuNice": 5, "uclampMax": 1024,
-    "memoryHighMiB": 0, "memoryMaxMiB": 0,
-    "uploadBps": 0, "downloadBps": 0, "burstBytes": 65536,
-    "network": "allow", "permissions": {}, "appOps": {},
-    "wakeLocks": [], "cleanupOnTaskRemoved": false, "resident": false
+    "autostart": "deny",
+    "background": "balanced",
+    "cpuNice": 5,
+    "uclampMax": 1024,
+    "memoryHighMiB": 0,
+    "memoryMaxMiB": 0,
+    "uploadBps": 0,
+    "downloadBps": 0,
+    "burstBytes": 65536,
+    "network": "allow",
+    "permissions": {},
+    "appOps": {},
+    "wakeLocks": [],
+    "cleanupOnTaskRemoved": false,
+    "resident": false,
+    "cpuAffinity": {
+      "foreground": "system",
+      "background": "system"
+    }
   },
   "apps": {},
   "rules": [],
-  "pushProxy": {}
+  "pushProxy": {},
+  "scheduling": {
+    "backgroundSmallCoresOnly": false
+  }
 }

@@ -47,4 +47,6 @@ adb shell su -c 'sh /data/adb/fuxicontrol/recover.sh'
 
 若曾执行特定的 Thanox 接管，另见 [迁移文档](migration.md)。`restore_thanox.sh` 和相关回调工具是既有接管环境的恢复工具，不应在新设备上直接运行。
 
-从旧控制 socket 版本升级至 Binder 版本时，必须同步更新管理 APK、root daemon 与钩子并重启，避免混用传输协议。schema 1/2 导入会备份并迁移到 schema 3，包括命名配置方案；降级应恢复安装前完整配置，不能让旧程序直接读取 schema 3。
+从旧控制 socket 版本升级至 Binder 版本时，必须同步更新管理 APK、root daemon 与钩子并重启，避免混用传输协议。schema 1/2/3 导入会备份并迁移到 schema 4，包括命名配置方案；降级应恢复安装前完整配置，不能让旧程序直接读取 schema 4。
+
+0.7 的核心调度需要更新 APK、root 服务及 JNI。迁移不自动开启后台小核上限；临时应用验收后再启用。降级前使用新服务进入观察模式，确认亲和性已恢复，再恢复旧程序和升级前配置。

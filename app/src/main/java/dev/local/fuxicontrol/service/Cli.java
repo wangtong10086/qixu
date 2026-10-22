@@ -9,6 +9,13 @@ import org.json.JSONObject;
 public final class Cli {
     private static final String USAGE="""
             fuxictl status|capabilities|apps|explain PACKAGE
+            fuxictl cpu topology|status PACKAGE
+            fuxictl cpu background-little true|false
+            fuxictl thread list PACKAGE PROCESS | apply PACKAGE PROCESS FILE | remove PACKAGE PROCESS ID
+            fuxictl app export PACKAGE FILE | apply PACKAGE FILE [--replace] | unset PACKAGE FIELD
+            fuxictl process export PACKAGE PROCESS FILE
+            fuxictl profile list | create NAME | activate ID
+            Writes: --dry-run, --expected-revision NUMBER. FILE may be - to read stdin.
             fuxictl search QUERY [all|name|declared|granted|policy]
             fuxictl resources snapshot|settings|clear
             fuxictl resources history SCOPE IDENTITY [SINCE_MILLIS]
@@ -42,9 +49,42 @@ public final class Cli {
         if(value<=0) throw new IllegalArgumentException("Use unlimited to remove a rate limit");
         return value;
     }
-    public static JSONObject request(String[] a) throws Exception {
-        JSONObject r=new JSONObject();
+    public static JSONObject request(String[] arguments) throws Exception {
+        var positional=new java.util.ArrayList<String>();JSONObject r=new JSONObject();boolean replace=false;
+        for(int i=0;i<arguments.length;i++) {
+            switch(arguments[i]) {
+                case "--dry-run" -> r.put("dryRun",true);
+                case "--expected-revision" -> {if(++i==arguments.length)throw new IllegalArgumentException("Missing revision");r.put("expectedRevision",Long.parseLong(arguments[i]));}
+                case "--replace" -> replace=true;
+                default -> positional.add(arguments[i]);
+            }
+        }
+        String[] a=positional.toArray(String[]::new);
+        if(a.length==0)throw new IllegalArgumentException(USAGE);
+        if(replace&&!(a.length>1&&a[0].equals("app")&&a[1].equals("apply")))throw new IllegalArgumentException("--replace is for app apply");
         switch(a[0]) {
+            case "cpu" -> {
+                switch(a[1]) {
+                    case "topology" -> r.put("command","cpu.topology");
+                    case "status" -> r.put("command","cpu.status").put("package",a[2]);
+                    case "background-little" -> {dev.local.fuxicontrol.core.Policy.oneOf(a[2],"true","false");r.put("command","scheduling.patch").put("patch",new JSONObject().put("backgroundSmallCoresOnly",Boolean.parseBoolean(a[2])));}
+                    default -> throw new IllegalArgumentException(USAGE);
+                }
+            }
+            case "thread" -> {
+                r.put("package",a[2]).put("process",a[3]);
+                switch(a[1]) {
+                    case "list" -> r.put("command","threads.list");
+                    case "apply" -> r.put("command","thread.policy.put").put("rule",readObject(a[4]));
+                    case "remove" -> r.put("command","thread.policy.remove").put("id",a[4]);
+                    default -> throw new IllegalArgumentException(USAGE);
+                }
+            }
+            case "profile" -> {
+                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"list","create","activate");
+                r.put("command",a[1].equals("list")?"config.get":"profile."+a[1]);
+                if(!a[1].equals("list"))r.put(a[1].equals("create")?"name":"id",a[2]);
+            }
             case "cleanup" -> {
                 dev.local.fuxicontrol.core.Policy.oneOf(a[1],"preview","run","status");
                 r.put("command","cleanup."+a[1]);
@@ -58,14 +98,15 @@ public final class Cli {
                 if(a[1].equals("settings")&&a.length>2) {dev.local.fuxicontrol.core.Policy.oneOf(a[2],"true","false");r.put("history",Boolean.parseBoolean(a[2]));}
             }
             case "process" -> {
-                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"list","apply","inherit");
+                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"list","apply","inherit","export");
                 r.put("package",a[2]);
                 if(a[1].equals("list"))r.put("command","resources.snapshot");
-                else {r.put("command",a[1].equals("apply")?"process.policy.patch":"process.policy.inherit").put("process",a[3]);if(a[1].equals("apply"))r.put("rule",new JSONObject(Text.read(Path.of(a[4]))));}
+                else if(a[1].equals("export"))r.put("command","app.get");
+                else {r.put("command",a[1].equals("apply")?"process.policy.patch":"process.policy.inherit").put("process",a[3]);if(a[1].equals("apply"))r.put("rule",readObject(a[4]));}
             }
             case "apps" -> {
                 if(a.length==1)r.put("command","apps");
-                else {dev.local.fuxicontrol.core.Policy.oneOf(a[1],"batch-apply");r.put("command","apps.batch.patch").put("packages",new JSONArray(Text.read(Path.of(a[2])))).put("patch",new JSONObject(Text.read(Path.of(a[3]))));}
+                else {dev.local.fuxicontrol.core.Policy.oneOf(a[1],"batch-apply");r.put("command","apps.batch.patch").put("packages",new JSONArray(Text.read(Path.of(a[2])))).put("patch",readObject(a[3]));}
             }
             case "ads" -> {
                 if(a[1].equals("status")) r.put("command","ads.status");
@@ -90,13 +131,15 @@ public final class Cli {
             case "stats" -> r.put("command","network.stats").put("uid",a.length>1?Integer.parseInt(a[1]):-1);
             case "defaults" -> {
                 if(a[1].equals("show")) r.put("command","defaults.get");
-                else if(a[1].equals("apply")) r.put("command","defaults.patch").put("patch",new JSONObject(Text.read(Path.of(a[2]))));
+                else if(a[1].equals("apply")) r.put("command","defaults.patch").put("patch",readObject(a[2]));
                 else throw new IllegalArgumentException(USAGE);
             }
             case "app" -> {
                 r.put("package",a[2]);
                 switch(a[1]) {
-                    case "show" -> r.put("command","app.get");
+                    case "show","export" -> r.put("command","app.get");
+                    case "apply" -> r.put("command",replace?"app.replace":"app.apply").put("patch",readObject(a[3]));
+                    case "unset" -> r.put("command","app.unset").put("field",a[3]);
                     case "inherit" -> r.put("command","app.inherit");
                     case "set" -> {
                         Object value=switch(a[3]) {
@@ -106,7 +149,7 @@ public final class Cli {
                                 yield Boolean.parseBoolean(a[4]);
                             }
                             case "uploadBps","downloadBps" -> rate(a[4]);
-                            case "cpuQuota","manualCleanup","services","permissions","appOps" -> new JSONObject(a[4]);
+                            case "cpuAffinity","processes","cpuQuota","manualCleanup","services","permissions","appOps" -> new JSONObject(a[4]);
                             case "wakeLocks" -> new JSONArray(a[4]);
                             default -> a[4];
                         };
@@ -125,7 +168,7 @@ public final class Cli {
                 r.put("command","app.patch").put("package",a[2]).put("patch",patch);
             }
             case "config" -> {
-                if(a[1].equals("import")) r.put("command","config.replace").put("config",new JSONObject(Text.read(Path.of(a[2]))));
+                if(a[1].equals("import")) r.put("command","config.replace").put("config",readObject(a[2]));
                 else if(a[1].equals("export")) r.put("command","config.get");
                 else throw new IllegalArgumentException(USAGE);
             }
@@ -140,8 +183,17 @@ public final class Cli {
             }
             default -> throw new IllegalArgumentException(USAGE);
         }
-        for(String arg:a) if(arg.equals("--dry-run")) r.put("dryRun",true);
+
         return r;
+    }
+    private static JSONObject readObject(String file) throws Exception {
+        if(!file.equals("-"))return new JSONObject(Text.read(Path.of(file)));
+        byte[] bytes=System.in.readNBytes(262145);
+        if(bytes.length>262144)throw new IllegalArgumentException("Input exceeds 256 KiB");
+        return new JSONObject(new String(bytes,java.nio.charset.StandardCharsets.UTF_8));
+    }
+    private static boolean mutation(String command) {
+        return java.util.Set.of("defaults.patch","app.patch","app.replace","app.apply","app.unset","app.inherit","config.replace","mode.set","rules.replace","migration.import","profile.create","profile.activate","process.policy.patch","process.policy.inherit","thread.policy.put","thread.policy.remove","apps.batch.patch","service.policy","scheduling.patch").contains(command);
     }
     public static void main(String[] args) {
         if(args.length==0 || args[0].equals("help")) {System.out.print(USAGE);return;}
@@ -150,7 +202,22 @@ public final class Cli {
             if(args[0].equals("recover")) {
                 System.out.print(Shell.run("sh","/data/adb/fuxicontrol/recover.sh"));return;
             }
-            JSONObject result=Wire.call(request(args));
+            JSONObject request=request(args);
+            if(mutation(request.getString("command"))&&!request.has("expectedRevision"))request.put("expectedRevision",Wire.call(new JSONObject().put("command","status")).getLong("revision"));
+            JSONObject result=Wire.call(request);
+            if(args[0].equals("app")&&args[1].equals("export")) {
+                result=result.getJSONObject("overrides");Text.write(Path.of(args[3]),result.toString(2)+"\n",StandardOpenOption.CREATE_NEW);
+            }
+            if(args[0].equals("process")&&args[1].equals("export")) {
+                JSONObject rules=result.getJSONObject("overrides").optJSONObject("processes");
+                result=rules!=null&&rules.has(args[3])?rules.getJSONObject(args[3]):new JSONObject();
+                Text.write(Path.of(args[4]),result.toString(2)+"\n",StandardOpenOption.CREATE_NEW);
+            }
+            if(args[0].equals("profile")&&args[1].equals("list")) {
+                JSONObject profiles=result.optJSONObject("profiles"),items=new JSONObject();
+                if(profiles!=null)for(String id:dev.local.fuxicontrol.core.Json.keys(profiles))items.put(id,profiles.getJSONObject(id).getString("name"));
+                result=new JSONObject().put("activeProfile",result.optString("activeProfile","default")).put("profiles",items);
+            }
             if(args[0].equals("config") && args[1].equals("export"))
                 Text.write(Path.of(args[2]),result.toString(2)+"\n",StandardOpenOption.CREATE_NEW);
             System.out.println(result.toString(2));

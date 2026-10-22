@@ -6,7 +6,7 @@
 
 <img src="docs/qixu/icon.svg" alt="栖序图标" width="96" />
 
-当前为 **0.6.0-alpha7 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
+当前为 **0.7.0-alpha1 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
 
 > 当前版本包含整机／应用／进程资源视图、环形概览、Monet 配色、一键清理及 Binder 控制通道。CPU 时间配额需要匹配内核支持，详见 [资源管理](docs/resources.md) 与 [CPU 配额](docs/cpu-quota.md)。
 
@@ -17,6 +17,7 @@
 - 息屏延时清理缓存进程、逐应用显式强停；保护关键服务、常驻、前台任务及音频。
 - 后台服务列表、组件停用与原状态恢复；新功能默认关闭。
 - 签名及入口结构校验的跨版本开屏广告适配，支持逐应用开关、异常暂停与重试，验收边界见文档。
+- 应用、进程和线程核心选择，名称／通配符规则、可选后台小核上限、实际核心状态与可恢复的亲和性。
 - nice / uclamp、按 UID 聚合的前后台 CPU 时间配额、cgroup 内存回收阈值与硬上限；支持恢复原设置。
 - eBPF 逐 UID 上传／下载限速与超限丢包统计，保留原 Android 网络检查路径。
 - 权限和 AppOps 模板，初始没有拒绝清单；类型化自动化、推送代理。
@@ -59,6 +60,7 @@ adb shell su -c '/data/adb/fuxicontrol/fuxictl running'
 | 入口 | 内容 |
 | --- | --- |
 | [架构](docs/architecture.md) | 模块、数据流与权限边界 |
+| [CLI 手册](docs/cli.md) / [高级核心调度](docs/scheduling.md) | 单应用文件配置、线程规则、预览、继承与恢复 |
 | [策略](docs/policy.md) / [控制协议](docs/protocol.md) | 字段、继承、Binder/AIDL 与 CLI |
 | [开屏广告](docs/splash-ads.md) / [后台管理](docs/background-management.md) | 适配范围、息屏策略、组件操作与验收边界 |
 | [示例](examples/README.md) | 合成配置与命令，不包含个人策略 |

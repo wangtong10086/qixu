@@ -12,6 +12,10 @@ public class ExamplesTest {
             return new JSONObject(new String(stream.readAllBytes(), StandardCharsets.UTF_8));
         }
     }
+    @Test public void affinityExamplesAreAccepted() throws Exception {
+        Policy.validatePatch(example("app-affinity.json"));
+        AffinityPolicy.threads(new org.json.JSONArray().put(example("thread-affinity.json")));
+    }
     @Test public void initialExampleIsNonExecutingAndValid() throws Exception {
         JSONObject policy = example("policy.observe.json");
         Policy.validate(policy);
