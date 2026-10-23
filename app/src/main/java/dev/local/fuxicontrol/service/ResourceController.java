@@ -32,19 +32,21 @@ public final class ResourceController {
         applyFile(group.resolve("memory.high"), highMiB==0?null:Long.toString(Math.multiplyExact(highMiB,1048576)));
         applyFile(group.resolve("memory.max"), maxMiB==0?null:Long.toString(Math.multiplyExact(maxMiB,1048576)));
     }
-    public synchronized JSONObject cpuQuota(int uid,JSONObject quota,boolean foreground,boolean exempt,boolean hasIsolated) throws Exception {
+    public synchronized JSONObject cpuQuota(int uid,JSONObject quota,boolean foreground,boolean exempt,Set<Integer> isolatedUids) throws Exception {
         Path group=Path.of("/sys/fs/cgroup/apps/uid_"+uid),file=group.resolve("cpu.max");
         long budget=dev.local.fuxicontrol.core.CpuQuota.budget(quota,foreground,exempt);
         JSONObject result=new JSONObject().put("configured",quota).put("phase",foreground?"foreground":"background").put("applied",false);
         if(V1CpuQuota.supported()) {
-            if(hasIsolated) {v1.restore(uid);return result.put("state","pending-layout").put("reason","隔离进程尚未归入同一个 CPU 预算组");}
-            JSONObject applied=v1.apply(uid,budget,quota.getLong("periodUs"),processes.getOrDefault(uid,java.util.List.of()));
+            var members=new java.util.ArrayList<>(processes.getOrDefault(uid,java.util.List.of()));
+            for(int isolated:isolatedUids)members.addAll(processes.getOrDefault(isolated,java.util.List.of()));
+            // The v1 group belongs to the owner: isolated UIDs share, not multiply, its budget.
+            JSONObject applied=v1.apply(uid,budget,quota.getLong("periodUs"),members);
             for(String key:dev.local.fuxicontrol.core.Json.keys(applied))result.put(key,applied.get(key));
             return result;
         }
         if(!Files.exists(file)) return result.put("state",budget==0?"off":"pending-kernel").put("reason","需要启用 CFS bandwidth 的内核及经过验证的 UID CPU 层级");
         // Do not copy an app budget to each isolated UID: that would multiply its allowance.
-        if(hasIsolated) {applyFile(file,null);return result.put("state","pending-layout").put("reason","隔离进程尚未归入同一个 CPU 预算组");}
+        if(!isolatedUids.isEmpty()) {applyFile(file,null);return result.put("state","pending-layout").put("reason","隔离进程尚未归入同一个 CPU 预算组");}
         for(Path process:processes.getOrDefault(uid,java.util.List.of())) {
             try(var threads=Files.list(process.resolve("task"))) {
                 for(Path task:threads.toList()) {
@@ -103,12 +105,24 @@ public final class ResourceController {
     public synchronized void scheduling(int uid,int nice,int clamp,boolean eligible) throws Exception {
         for(Path process:processes.getOrDefault(uid,java.util.List.of())) {
             try(var tids=Files.list(process.resolve("task"))) {
-                for(Path task:tids.toList()) updateTask(task,nice,clamp,eligible && (nice!=0 || clamp!=1024));
+                var changes=new java.util.ArrayList<TaskChange>();
+                for(Path task:tids.toList()) updateTask(task,nice,clamp,eligible && (nice!=0 || clamp!=1024),changes);
+                applyTaskChanges(changes);
             } catch(java.nio.file.NoSuchFileException gone) { /* Process exited during reconciliation. */ }
         }
     }
     private final Set<Long> currentNetworks=new HashSet<>();
-    public synchronized void beginProcesses() throws org.json.JSONException {currentNetworks.clear();affinity.begin();}
+    public synchronized void beginProcesses() throws Exception {
+        currentNetworks.clear();affinity.begin();
+        // Exited threads cannot be restored. Keep the journal bounded to live identities.
+        for(String key:new HashSet<>(dev.local.fuxicontrol.core.Json.keys(journal))) {
+            if(!key.startsWith("task:"))continue;
+            try {
+                if(!start(Path.of("/proc/"+key.substring(5))).equals(journal.getJSONObject(key).getString("start")))journal.remove(key);
+            } catch(java.nio.file.NoSuchFileException exited) {journal.remove(key);}
+        }
+        persist();
+    }
     public synchronized void finishProcesses() throws Exception {
         affinity.finish();
         for(String key:new HashSet<>(dev.local.fuxicontrol.core.Json.keys(journal))) if(key.startsWith("network:")) {
@@ -131,7 +145,9 @@ public final class ResourceController {
                 Path group=Path.of("/sys/fs/cgroup"+relative);
                 JSONObject effective=dev.local.fuxicontrol.core.ProcessPolicy.effective(policy,rule==null?new JSONObject():rule,foreground,activity);
                 try(var tids=Files.list(process.resolve("task"))) {
-                    for(Path task:tids.toList()) updateTask(task,effective.getInt("cpuNice"),effective.getInt("uclampMax"),effective.getInt("cpuNice")!=0 || effective.getInt("uclampMax")!=1024);
+                    var changes=new java.util.ArrayList<TaskChange>();
+                    for(Path task:tids.toList()) updateTask(task,effective.getInt("cpuNice"),effective.getInt("uclampMax"),effective.getInt("cpuNice")!=0 || effective.getInt("uclampMax")!=1024,changes);
+                    applyTaskChanges(changes);
                 }
                 Path cpu=group.resolve("cpu.max");
                 if(Files.exists(cpu)) {
@@ -151,7 +167,19 @@ public final class ResourceController {
             } catch(java.nio.file.NoSuchFileException exited) { /* Process exited while reconciling. */ }
         }
     }
-    private void updateTask(Path task,int nice,int clamp,boolean eligible) throws Exception {
+    private record TaskChange(Path task,String start,int nice,int minimum,int maximum) {}
+    private void applyTaskChanges(java.util.List<TaskChange> changes) throws Exception {
+        if(changes.isEmpty())return;
+        persist(); // One durable recovery snapshot per process, before any scheduling mutation.
+        for(TaskChange change:changes) {
+            try {
+                if(!start(change.task).equals(change.start))continue;
+                int tid=Integer.parseInt(change.task.getFileName().toString());
+                Process.setThreadPriority(tid,change.nice);Native.clamp(tid,change.minimum,change.maximum);
+            } catch(java.nio.file.NoSuchFileException exited) { /* Thread exited before applying. */ }
+        }
+    }
+    private void updateTask(Path task,int nice,int clamp,boolean eligible,java.util.List<TaskChange> changes) throws Exception {
         int tid=Integer.parseInt(task.getFileName().toString());
         String key="task:"+tid;
         JSONObject entry=journal.optJSONObject(key);
@@ -184,8 +212,8 @@ public final class ResourceController {
         int applied=nice==0?entry.getInt("beforeNice"):Math.max(entry.getInt("beforeNice"),nice);
         int minimum=Math.min(entry.getInt("beforeMin"),clamp);
         if(entry.optInt("appliedNice",-1)==applied && entry.optInt("appliedClamp",-1)==clamp && entry.optInt("appliedMin",-1)==minimum && current==applied) return;
-        entry.put("appliedNice",applied).put("appliedClamp",clamp).put("appliedMin",minimum);persist();
-        Process.setThreadPriority(tid,applied);Native.clamp(tid,minimum,clamp);
+        entry.put("appliedNice",applied).put("appliedClamp",clamp).put("appliedMin",minimum);
+        changes.add(new TaskChange(task,identity,applied,minimum,clamp));
     }
     public synchronized void restoreAll() throws Exception {
         v1.restoreAll();
@@ -195,7 +223,7 @@ public final class ResourceController {
             if(key.startsWith("task:")) {
                 int tid=Integer.parseInt(key.substring(5));
                 Path task=Path.of("/proc/"+tid);
-                if(Files.exists(task)) updateTask(task,0,1024,false);else journal.remove(key);
+                if(Files.exists(task)) updateTask(task,0,1024,false,java.util.List.of());else journal.remove(key);
             } else {
                 Path path=Path.of(key);
                 if(Files.exists(path)) applyFile(path,null);else journal.remove(key);

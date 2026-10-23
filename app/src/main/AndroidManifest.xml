@@ -5,11 +5,17 @@
     <application android:label="栖序" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:theme="@style/AppTheme"
         android:allowBackup="false" android:supportsRtl="true" android:extractNativeLibs="true">
         <provider android:name=".service.BrokerProvider" android:authorities="dev.local.fuxicontrol.ipc" android:exported="true" android:directBootAware="true" android:process=":ipc" />
+        <activity android:name=".ui.QuickCleanupActivity" android:exported="false" android:excludeFromRecents="true" android:taskAffinity="dev.local.fuxicontrol.cleanup" />
+        <service android:name=".ui.CleanupTileService" android:exported="true" android:icon="@drawable/ic_cleanup" android:label="一键清理" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="true" />
+        </service>
         <activity android:name=".ui.SchedulingActivity" android:exported="false" />
         <activity android:name=".ui.ResourceActivity" android:exported="false" />
         <activity android:name=".ui.MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
         </activity>
     </application>
 </manifest>

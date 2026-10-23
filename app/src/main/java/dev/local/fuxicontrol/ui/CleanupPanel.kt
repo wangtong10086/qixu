@@ -31,9 +31,11 @@ import org.json.*
         } catch(e:java.io.IOException) {error=e.message?:"无法预览"}
         finally {busy=false}
     }}
-    OutlinedButton(onClick={visible=true;refresh()}) {Text("清理后台")}
+    CleanupAction()
+    TextButton(onClick={visible=true;refresh()}) {Text("清理规则与预览")}
     if(visible) AlertDialog(onDismissRequest={visible=false},title={Text("清理后台")},text={
         Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Text("一键清理会强制停止符合规则的应用，可能暂停通知，直到再次打开。此预览保留各应用原有清理力度。")
             Text("仅清理符合规则的后台应用。执行前再次检查保护状态，不显示估算释放内存。")
             if(busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             if(error.isNotEmpty()) Text(error,color=MaterialTheme.colorScheme.error)

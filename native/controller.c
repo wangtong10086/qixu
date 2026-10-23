@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include "network.h"
@@ -159,4 +160,32 @@ JNIEXPORT void JNICALL Java_dev_local_fuxicontrol_service_Native_setAffinity(JNI
     (*env)->ReleaseIntArrayElements(env,cpus,values,JNI_ABORT);
     int result=sched_setaffinity(tid,size,mask),error=errno;free(mask);errno=error;
     if(result<0)affinity_error(env,"sched_setaffinity");
+}
+
+/* Pin the task before checking /proc, so a recycled numeric PID cannot be signalled. */
+JNIEXPORT jboolean JNICALL Java_dev_local_fuxicontrol_service_Native_terminateProcess(
+        JNIEnv *env,jclass type,jint pid,jint uid,jlong start) {
+    int fd=syscall(__NR_pidfd_open,pid,0);
+    if(fd<0) {if(errno==ESRCH)return JNI_FALSE;fail(env,"pidfd_open");return JNI_FALSE;}
+    char path[64],buffer[4096];snprintf(path,sizeof(path),"/proc/%d",pid);
+    int proc=open(path,O_RDONLY|O_DIRECTORY|O_CLOEXEC);
+    if(proc<0) {int error=errno;close(fd);errno=error;if(error!=ENOENT)fail(env,"Open process");return JNI_FALSE;}
+    int statusfd=openat(proc,"status",O_RDONLY|O_CLOEXEC);
+    if(statusfd<0) {int error=errno;close(proc);close(fd);errno=error;if(error!=ENOENT&&error!=ESRCH)fail(env,"Process owner");return JNI_FALSE;}
+    ssize_t statuslen=read(statusfd,buffer,sizeof(buffer)-1);int statuserror=errno;close(statusfd);
+    if(statuslen<0) {close(proc);close(fd);errno=statuserror;fail(env,"Read process owner");return JNI_FALSE;}
+    buffer[statuslen]=0;char *uidline=strstr(buffer,"\nUid:");unsigned actual_uid;
+    if(!uidline || sscanf(uidline,"\nUid: %u",&actual_uid)!=1) {close(proc);close(fd);errno=EINVAL;fail(env,"Malformed process owner");return JNI_FALSE;}
+    int statfd=openat(proc,"stat",O_RDONLY|O_CLOEXEC);close(proc);
+    if(statfd<0) {int error=errno;close(fd);errno=error;if(error!=ENOENT&&error!=ESRCH)fail(env,"Process identity");return JNI_FALSE;}
+    ssize_t length=read(statfd,buffer,sizeof(buffer)-1);int error=errno;close(statfd);
+    if(length<0) {close(fd);errno=error;fail(env,"Read process identity");return JNI_FALSE;}
+    buffer[length]=0;
+    char *end=strrchr(buffer,')'),*save=NULL,*field=end?strtok_r(end+1," ",&save):NULL;
+    for(int number=3;field&&number<22;number++)field=strtok_r(NULL," ",&save);
+    if(!field) {close(fd);errno=EINVAL;fail(env,"Malformed process stat");return JNI_FALSE;}
+    if(actual_uid!=(unsigned)uid || strtoull(field,NULL,10)!=(unsigned long long)start) {close(fd);return JNI_FALSE;}
+    int result=syscall(__NR_pidfd_send_signal,fd,SIGKILL,NULL,0);error=errno;close(fd);
+    if(result<0) {errno=error;if(error!=ESRCH)fail(env,"pidfd_send_signal");return JNI_FALSE;}
+    return JNI_TRUE;
 }

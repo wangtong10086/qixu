@@ -64,10 +64,12 @@ public final class AffinityController {
     public void apply(int uid,List<Path> processes,JSONObject app,boolean foreground,boolean backgroundCeiling) throws Exception {
         JSONArray result=new JSONArray();states.put(uid,result);
         String phase=foreground?"foreground":"background";processCounts.put(uid,processes.size());
-        if(!AffinityPolicy.requiresBinding(app,phase,!foreground&&backgroundCeiling))return;
+        boolean binding=AffinityPolicy.requiresBinding(app,phase,!foreground&&backgroundCeiling);
+        if(!binding && processes.stream().noneMatch(p->processEntries.containsKey(Integer.parseInt(p.getFileName().toString()))))return;
         var online=topology.online();
         List<Change> changes=new ArrayList<>();
         for(Path process:processes) {
+            if(!binding && !processEntries.containsKey(Integer.parseInt(process.getFileName().toString())))continue;
             try {
                 int pid=Integer.parseInt(process.getFileName().toString());String processStart=identity(process);
                 String name=Text.read(process.resolve("cmdline")).split("\\x00",2)[0];

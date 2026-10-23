@@ -210,6 +210,7 @@ private fun normalizedLimits(value:JSONObject):JSONObject {
                         },label={Text(tab)})}
                     }
                 }
+                if(pkg.isNotEmpty())item {CleanupAction(pkg=pkg,process=if(process.isEmpty())null else current,enabled=if(process.isEmpty())live.isNotEmpty() else current!=null)}
                 if(process.isNotEmpty())item {OutlinedButton(enabled=draft==original,onClick={context.startActivity(Intent(context,SchedulingActivity::class.java).putExtra("package",pkg).putExtra("process",process))}){Text("线程与核心调度")}}
                 if(process.isNotEmpty())item {Row {listOf("资源","限制").forEach{tab->FilterChip(processTab==tab,{processTab=tab},label={Text(tab)})}}}
                 if((section!="进程" || process.isNotEmpty() || pkg.isEmpty()) && (process.isEmpty() || processTab=="资源")) {
@@ -274,7 +275,7 @@ private fun normalizedLimits(value:JSONObject):JSONObject {
                     val names=(live.map{it.getString("name")}+rules.keys().asSequence().toList()).distinct()
                     items(names){name->
                         val p=live.firstOrNull{it.getString("name")==name}
-                        Entry(name,(if(p==null)"未运行" else "PID ${p.getInt("pid")} · ${resourceDescription(p)}")+if(rules.has(name))" · 有独立规则" else " · 继承应用"){process=name;processTab="资源"}
+                        Entry(name,(if(p==null)"未运行" else "PID ${p.getInt("pid")} · ${resourceDescription(p)}")+if(rules.has(name))" · 有独立规则" else " · 继承应用",trailing={if(p!=null)CleanupAction(pkg=pkg,process=p,menu=true)}){process=name;processTab="资源"}
                     }
                     if(names.isEmpty())item{Text("当前未发现运行进程或已保存规则")}
                 } else if(process.isNotEmpty() && processTab=="限制") {

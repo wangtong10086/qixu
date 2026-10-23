@@ -6,7 +6,7 @@
 
 <img src="docs/qixu/icon.svg" alt="栖序图标" width="96" />
 
-当前为 **0.7.0-alpha1 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
+当前为 **0.7.0-alpha5 实验版本**，主要验证平台为 Xiaomi 13 / Android 16 / Linux 5.15。内核、ROM 私有接口和 Vector 版本会影响兼容性，不承诺其他设备直接可用。项目不提供 Root 隐藏或 Play Integrity 绕过功能。
 
 > 当前版本包含整机／应用／进程资源视图、环形概览、Monet 配色、一键清理及 Binder 控制通道。CPU 时间配额需要匹配内核支持，详见 [资源管理](docs/resources.md) 与 [CPU 配额](docs/cpu-quota.md)。
 
@@ -25,7 +25,7 @@
 - 名称、包名、权限与策略关键词搜索，区分声明和已授予权限；应用列表与详情显示真实图标。
 - 真实进程快照可视化，区分前台、可见、后台和缓存；可见页面每 5 秒刷新。
 - 本机 root 与 adb root CLI 完整控制；管理界面按 UID 和签名认证，通过本机 Binder/AIDL 与匿名管道通信。
-- 按独立规则预览和执行一键清理，执行前复核关键服务、活动任务及配置变更。
+- 首页、桌面快捷方式和快捷设置磁贴一键清理；支持单独强停应用或结束进程，保留规则预览、活动任务确认与关键服务保护。
 
 限速默认关闭；硬内存限制可能终止应用。没有未经测量的省电比例，也不把启动成功当成所有业务功能正常。
 
@@ -56,6 +56,8 @@ adb shell su -c '/data/adb/fuxicontrol/fuxictl running'
 兼容现有安装：包名仍为 `dev.local.fuxicontrol`，CLI 为 `fuxictl`，设备数据目录为 `/data/adb/fuxicontrol`。源码和构建流程公开；不提供任何私有签名密钥。自行构建与已安装版本的签名不同，不能直接覆盖升级。
 
 ## 文档与目录
+
+[后台清理与快捷入口](docs/manual-cleanup.md)：一键强停、应用／进程结束及 CLI。
 
 | 入口 | 内容 |
 | --- | --- |

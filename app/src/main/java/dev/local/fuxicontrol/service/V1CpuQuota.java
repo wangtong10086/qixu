@@ -103,7 +103,13 @@ final class V1CpuQuota {
                     move(ROOT.resolve(destination.substring(1)).resolve("tasks"),tid);
                 } catch(NoSuchFileException exited) { /* Thread exited. */ }
             }
-            Files.delete(group);
+            try {android.system.Os.remove(group.toString());}
+            catch(android.system.ErrnoException busy) {
+                // A concurrent clone can inherit the group after the task snapshot.
+                // Quota is already disabled; keep ownership and drain it next reconciliation.
+                if(busy.errno!=android.system.OsConstants.EBUSY)throw busy;
+                return;
+            }
         }
         groups.remove(key);save();
     }

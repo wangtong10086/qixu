@@ -18,13 +18,29 @@ public final class Commands {
     public Commands(Store store,Catalog catalog,Audit audit,RuntimeEngine engine,SplashChannel splash,ResourceMonitor resources) {
         this.store=store;this.catalog=catalog;this.audit=audit;this.engine=engine;this.discovery=new AppDiscovery(catalog);this.splash=splash;this.resources=resources;this.cleanup=new ManualCleanupController(store,engine,resources);
     }
-    public synchronized JSONObject execute(JSONObject request) throws Exception {
+    private final java.util.concurrent.locks.ReentrantLock execution=new java.util.concurrent.locks.ReentrantLock(true);
+    public JSONObject execute(JSONObject request) throws Exception {
+        // System events must not queue behind UI queries or configuration writes.
+        if(request.getString("command").equals("event")) {
+            if(request.getString("type").equals("package-changed"))return engine.event(request);
+            return engine.lifecycleEvent(request);
+        }
+        execution.lockInterruptibly();
+        try {return executeLocked(request);} finally {execution.unlock();}
+    }
+    private JSONObject executeLocked(JSONObject request) throws Exception {
         String command=request.getString("command");
         JSONObject config=store.get();
         if(request.has("expectedRevision") && request.getLong("expectedRevision")!=config.getLong("revision"))
             throw new IllegalStateException("Configuration changed; reload before saving");
         JSONObject result;
         switch(command) {
+            case "cleanup.quick" -> {return cleanup.quick(request.optBoolean("dryRun"));}
+            case "cleanup.app", "cleanup.process" -> {
+                if(command.equals("cleanup.process") && (!request.has("pid") || !request.has("startTicks"))) throw new IllegalArgumentException("Missing process identity");
+                if(command.equals("cleanup.app") && request.has("pid")) throw new IllegalArgumentException("Unexpected process target");
+                return cleanup.single(request);
+            }
             case "cleanup.preview" -> {return cleanup.preview();}
             case "cleanup.run" -> {return cleanup.run(request.getString("id"),request.getLong("expectedRevision"));}
             case "cleanup.status" -> {return cleanup.status();}

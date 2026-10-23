@@ -5,6 +5,13 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class CleanupPolicyTest {
+    @org.junit.Test public void foregroundServiceCanUseConfirmationButVisibleActivityCannot() {
+        org.junit.Assert.assertTrue(CleanupDecision.hasVisibleActivity(100));
+        org.junit.Assert.assertTrue(CleanupDecision.hasVisibleActivity(200));
+        org.junit.Assert.assertFalse(CleanupDecision.hasVisibleActivity(125));
+        org.junit.Assert.assertFalse(CleanupDecision.hasVisibleActivity(400));
+    }
+
     @Test public void oldConfigurationsKeepCleanupDisabled() {
         var config=Policy.initial();config.getJSONObject("defaults").remove("screenOffCleanup");
         config.getJSONObject("defaults").remove("screenOffDelaySeconds");

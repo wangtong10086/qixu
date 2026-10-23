@@ -38,8 +38,9 @@ import org.json.JSONObject
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CleanupShortcuts.publish(this)
         setContent {
-            QixuTheme(window) { Controller() }
+            QixuTheme(window) { Controller(intent.action=="android.service.quicksettings.action.QS_TILE_PREFERENCES") }
         }
     }
 }
@@ -66,13 +67,14 @@ internal fun Entry(
     icon: Int = R.drawable.ic_chevron_right,
     enabled: Boolean = true,
     leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
     action: () -> Unit,
 ) {
     ListItem(
         headlineContent = { Text(title) },
         leadingContent = leading,
         supportingContent = { Text(subtitle) },
-        trailingContent = { Glyph(icon) },
+        trailingContent = trailing ?: { Glyph(icon) },
         modifier = Modifier.clickable(enabled = enabled, onClick = action).heightIn(min = 72.dp),
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
@@ -91,13 +93,13 @@ internal fun modeLabel(value: String) =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Controller() {
+private fun Controller(cleanupSettings:Boolean=false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
     val appIcons = remember { AppIcons() }
-    var page by rememberSaveable { mutableStateOf("概览") }
-    var tab by rememberSaveable { mutableStateOf("概览") }
+    var page by rememberSaveable { mutableStateOf(if(cleanupSettings)"设置" else "概览") }
+    var tab by rememberSaveable { mutableStateOf(if(cleanupSettings)"设置" else "概览") }
     var configText by rememberSaveable { mutableStateOf("{}") }
     var status by remember { mutableStateOf(JSONObject()) }
     var apps by remember { mutableStateOf(emptyList<JSONObject>()) }
@@ -511,10 +513,10 @@ private fun Controller() {
                             }
                         }
                         item {
+                            CleanupPanel()
                             ResourceOverview {
                                 context.startActivity(Intent(context,ResourceActivity::class.java))
                             }
-                            CleanupPanel()
                             RunningSummary(running, runningError) {
                                 filter = it
                                 navigate("应用")
@@ -665,6 +667,7 @@ private fun Controller() {
                                     permissionEvidence(app, search, searchScope),
                                 enabled = writable,
                                 leading = { ApplicationIcon(app, appIcons) },
+                                trailing = { if(running?.optJSONObject("apps")?.has(name)==true) CleanupAction(pkg=name,menu=true) else Glyph(R.drawable.ic_chevron_right) },
                             ) {
                                 packageName = name
                                 appLabel = app.getString("label")
@@ -767,6 +770,7 @@ private fun Controller() {
                                         permissionEvidence(app, policySearch, policyScope),
                                     enabled = writable,
                                     leading = { ApplicationIcon(app, appIcons) },
+                                trailing = { if(running?.optJSONObject("apps")?.has(name)==true) CleanupAction(pkg=name,menu=true) else Glyph(R.drawable.ic_chevron_right) },
                                 ) {
                                     packageName = name
                                     appLabel = app.getString("label")
@@ -782,6 +786,7 @@ private fun Controller() {
                     }
                     "设置" ->
                         item {
+                            CleanupShortcutSettings()
                             SectionTitle("诊断与高级")
                             listOf(
                                     "开屏广告状态" to "ads.status",

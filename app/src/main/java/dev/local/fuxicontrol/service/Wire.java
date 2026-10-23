@@ -9,6 +9,7 @@ import org.json.JSONObject;
 
 /** Binder authenticates callers; anonymous pipes carry large responses without Binder size limits. */
 public final class Wire {
+    private static final java.util.concurrent.Semaphore requests=new java.util.concurrent.Semaphore(4,true);
     public static final class CommandException extends IOException {
         public CommandException(String message) {super(message);}
     }
@@ -53,13 +54,15 @@ public final class Wire {
     public static Connection connect() throws IOException {return new Connection(false);}
     public static Connection splash() throws IOException {return new Connection(true);}
     public static JSONObject call(JSONObject request) throws IOException,org.json.JSONException {
+        try {requests.acquire();}
+        catch(InterruptedException e) {Thread.currentThread().interrupt();throw new InterruptedIOException("IPC request cancelled before submission");}
         try(Connection connection=connect()) {
             send(connection,request);String line=reader(connection).readLine();
             if(line==null) throw new IOException("Controller disconnected before responding");
             JSONObject response=new JSONObject(line);
             if(!response.getBoolean("ok")) throw new CommandException(response.getString("error"));
             return response.getJSONObject("result");
-        }
+        } finally {requests.release();}
     }
     public static BufferedReader reader(Connection connection) {return connection.input;}
     public static void send(Connection connection,JSONObject value) throws IOException,org.json.JSONException {connection.send(value);}

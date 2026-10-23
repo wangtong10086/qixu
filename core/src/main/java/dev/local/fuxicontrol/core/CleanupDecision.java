@@ -13,5 +13,7 @@ public final class CleanupDecision {
         if(playing) return "audio";
         return "";
     }
+    // Android importance 125 is a foreground service, not a visible activity.
+    public static boolean hasVisibleActivity(int importance) {return importance<=200 && importance!=125;}
     private CleanupDecision() {}
 }

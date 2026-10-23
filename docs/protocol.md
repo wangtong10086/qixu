@@ -176,7 +176,7 @@ The existing `config.get` / `config.replace` commands support full backup and re
 
 `cpuQuota` accepts optional boolean `allowProtected` (default false). Explicitly enabling it permits the UID budget despite protected/resident cleanup status; startup, network and active-task exemptions are unchanged. Shared-UID applications must agree on this flag and all quota values.
 
-The v1 backend reports `backend: cgroup-v1-uid`, `actual: "quota_us period_us"`, `cpuStat`, and `reassignedThreads`. `waiting-process` means no process exists to bind; isolated UIDs report `pending-layout`. Foreground/off restores owned membership. Android migration is event-driven with a five-second reconciliation interval; `applied` describes the observed kernel group, not a zero-latency migration guarantee. See [CPU quota](cpu-quota.md) for measured low-budget overhead.
+The v1 backend reports `backend: cgroup-v1-uid`, `actual: "quota_us period_us"`, `cpuStat`, and `reassignedThreads`. `waiting-process` means no process exists to bind; confirmed isolated UIDs share their owner UID budget on v1 (unverified v2 layouts report `pending-layout`). Foreground/off restores owned membership. Foreground events restore the target UID first; lifecycle events are processed between UID/stage boundaries during a full sweep. A five-second reconciliation interval remains for periodic corrections; `applied` describes the observed kernel group, not a zero-latency migration guarantee. See [CPU quota](cpu-quota.md) for measured low-budget overhead.
 
 ## 0.7 核心调度与文件配置接口
 
@@ -196,3 +196,17 @@ The v1 backend reports `backend: cgroup-v1-uid`, `actual: "quota_us period_us"`,
 写入返回额外的 `changes` 数组：path 是 JSON Pointer，before／after 是原值和新值。dryRun 额外返回 `schedulingPreview`，包含预检应用数、当前可见线程数、受限／无交集数量及匹配来源计数；这是预检采样，不执行绑核。配置保存与内核生效仍然分开。CLI 自动添加读取时版本，显式 RPC 维持原来的可选版本语义。
 
 `scheduling` 随命名方案保存，`cpuAffinity` 按阶段继承，线程字段与恢复语义见 [调度指南](scheduling.md)。完整文件、ADB 和冲突处理范例见 [CLI 手册](cli.md)。
+
+### IPC admission and cancellation
+
+Since 0.7.0-alpha2, exhausted session capacity returns the existing `ok:false` response with an `IPC_BUSY:` error prefix, rather than an unchecked Binder exception. The rejected command has not been submitted. The service retains limits of eight sessions per UID and 48 total; short requests share four client-process permits. No mutation is automatically retried. Queued command execution uses an interruptible lock so cancellation can release waiting workers.
+
+## Quick and single-target cleanup (0.7.0-alpha5)
+
+- `cleanup.quick`: optional `dryRun`; applies manual-cleanup eligibility and force-stops eligible applications.
+- `cleanup.app`: requires `package`; optional `overrideProtection` for a one-time active-task/resident exception.
+- `cleanup.process`: requires `package`, `pid`, `startTicks`; optional `overrideProtection`. Verifies ownership and process identity before signaling through pidfd.
+- Execution is asynchronous; poll `cleanup.status`, never replay a write to poll. Concurrent requests return the current job; clients must match the exact target before offering an override.
+- Critical services and visible applications cannot be overridden. Observe/off modes do not execute cleanup. Existing preview/run semantics remain unchanged.
+
+See [manual cleanup](manual-cleanup.md) for result states, CLI examples and protection boundaries.

@@ -156,3 +156,20 @@ fuxictl app apply com.example.app /data/local/tmp/app-policy.json --expected-rev
 | `appOps` | 操作名到 allow/ignore/deny/foreground/default 的对象 |
 
 更多命令：应用搜索、服务管理、资源历史、清理、广告规则和诊断见 `fuxictl help` 及 [完整 RPC 表](protocol.md)。`event` 是内部系统钩子接口，不用于伪造生命周期。
+
+## 一键清理与单项结束
+
+```sh
+fuxictl cleanup quick --dry-run
+fuxictl cleanup quick
+fuxictl cleanup app com.example.app
+fuxictl process list com.example.app
+# 使用上一步返回的 pid 和 startTicks：
+fuxictl cleanup process com.example.app 1234 87654321
+fuxictl cleanup status
+```
+
+清理请求异步执行，查询 `cleanup status` 获取逐项结果，不要重复提交来轮询。
+一键清理遵守筛选阈值和保护；单项操作忽略批量阈值，活动任务需要显式
+`--override-protection`，关键服务和可见应用始终保护。强停可能暂停通知直到再次打开应用。
+完整保护、观察模式及快捷入口语义见 [后台清理](manual-cleanup.md)。

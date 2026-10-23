@@ -22,7 +22,9 @@ public final class Cli {
             fuxictl resources settings true|false
             fuxictl process list PACKAGE | apply PACKAGE PROCESS FILE | inherit PACKAGE PROCESS
             fuxictl apps batch-apply PACKAGES_JSON_FILE PATCH_JSON_FILE
-            fuxictl cleanup preview|status | run PREVIEW_ID REVISION
+            fuxictl cleanup preview|status|quick | run PREVIEW_ID REVISION
+            fuxictl cleanup app PACKAGE [--override-protection]
+            fuxictl cleanup process PACKAGE PID START_TICKS [--override-protection]
             fuxictl running
             fuxictl services PACKAGE
             fuxictl service block|restore|stop PACKAGE CLASS
@@ -53,6 +55,7 @@ public final class Cli {
         var positional=new java.util.ArrayList<String>();JSONObject r=new JSONObject();boolean replace=false;
         for(int i=0;i<arguments.length;i++) {
             switch(arguments[i]) {
+                case "--override-protection" -> r.put("overrideProtection",true);
                 case "--dry-run" -> r.put("dryRun",true);
                 case "--expected-revision" -> {if(++i==arguments.length)throw new IllegalArgumentException("Missing revision");r.put("expectedRevision",Long.parseLong(arguments[i]));}
                 case "--replace" -> replace=true;
@@ -62,6 +65,7 @@ public final class Cli {
         String[] a=positional.toArray(String[]::new);
         if(a.length==0)throw new IllegalArgumentException(USAGE);
         if(replace&&!(a.length>1&&a[0].equals("app")&&a[1].equals("apply")))throw new IllegalArgumentException("--replace is for app apply");
+        if(r.has("overrideProtection") && !(a.length>1 && a[0].equals("cleanup") && (a[1].equals("app")||a[1].equals("process")))) throw new IllegalArgumentException("--override-protection is for single-target cleanup");
         switch(a[0]) {
             case "cpu" -> {
                 switch(a[1]) {
@@ -86,7 +90,11 @@ public final class Cli {
                 if(!a[1].equals("list"))r.put(a[1].equals("create")?"name":"id",a[2]);
             }
             case "cleanup" -> {
-                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"preview","run","status");
+                dev.local.fuxicontrol.core.Policy.oneOf(a[1],"preview","run","status","quick","app","process");
+                int expected=switch(a[1]) {case "app"->3;case "process"->5;case "run"->4;default->2;};
+                if(a.length!=expected) throw new IllegalArgumentException(USAGE);
+                if(a[1].equals("app")||a[1].equals("process")) r.put("package",a[2]);
+                if(a[1].equals("process")) r.put("pid",Integer.parseInt(a[3])).put("startTicks",Long.parseLong(a[4]));
                 r.put("command","cleanup."+a[1]);
                 if(a[1].equals("run")) r.put("id",a[2]).put("expectedRevision",Long.parseLong(a[3]));
             }

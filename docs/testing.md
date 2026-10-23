@@ -73,3 +73,12 @@ See [splash acceptance](splash-ads.md) and [background acceptance](background-ma
 - `test_process_resources.py` uses the disposable probe to verify CPU/memory/process-network controls and restores its policy.
 - `test_v1_cpu_quota.py` requires a paired kernel with CFS bandwidth enabled and changes probe CPU groups; inspect prerequisites first. It is never run by CI.
 - Native token-bucket checks, core/app unit tests, compilation and lint can run without a phone. Binder runtime, system hooks and actual cloud delivery remain device-specific acceptance.
+
+## Cleanup shortcuts and foreground recovery (0.7)
+
+- `test_manual_cleanup.py` changes only the disposable probe policy and restores it. It verifies foreground protection, stale process identity, child termination, whole-app stop and protected-task confirmation. Requires the probe APK and an idle test device.
+- `test_manual_cleanup_ui.py` checks app/process actions and navigation using the probe. It performs real termination; keep the device unlocked and do not use other applications during the run.
+- `test_foreground_latency.py` measures foreground quota/affinity restoration with a disposable probe under calibration load. Read its options first; results include ADB observation overhead, not frame timings.
+- `fixtures/IpcStress.java` is a root `app_process` fixture for read-only Binder saturation and concurrent status requests. It deliberately consumes the session limit; use only on an idle test setup.
+
+These are explicit device tests, not CI discovery targets. Keep captures private and restore policies after testing. Global bulk termination and shortcut/tile click flows have separate acceptance boundaries recorded in [validation](validation.md).

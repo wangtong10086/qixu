@@ -44,8 +44,14 @@ final class ControllerEndpoint extends IController.Stub {
                 if(uid!=0 && uid!=1000 && !catalog.managerUid(uid,signer)) throw new SecurityException("Untrusted controller caller");
                 if(uid==1000 && !Set.of("watch","event","status").contains(command)) throw new SecurityException("Restricted system caller");
             }
-            if(sessions.values().stream().filter(s->s.uid()==uid).count()>=8 || !slots.tryAcquire())
-                throw new IllegalStateException("Too many IPC requests");
+            if(sessions.values().stream().filter(s->s.uid()==uid).count()>=8 || !slots.tryAcquire()) {
+                // Admission failure is a command response, not an unchecked Binder exception.
+                ParcelFileDescriptor[] rejected=ParcelFileDescriptor.createReliablePipe();
+                try(var output=new ParcelFileDescriptor.AutoCloseOutputStream(rejected[1])) {
+                    output.write((new JSONObject().put("ok",false).put("error","IPC_BUSY: 栖序服务繁忙，请稍后再试；本次请求未提交").toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                return rejected[0];
+            }
             ParcelFileDescriptor[] pipe;
             try {pipe=ParcelFileDescriptor.createReliablePipe();}
             catch(IOException e) {slots.release();throw e;}

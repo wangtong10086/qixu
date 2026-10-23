@@ -8,7 +8,7 @@
         <activity android:name=".Main" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
-        <service android:name=".Isolated" android:isolatedProcess="true" android:exported="false" />
+        <service android:name=".Isolated" android:process=":isolated" android:isolatedProcess="true" android:exported="false" />
         <service android:name=".NetworkService" android:exported="true" android:process=":network" />
         <service android:name=".AffinityWorker" android:exported="false" android:process=":affinity" />
         <service android:name=".ResourceWorker" android:exported="false" android:process=":worker" />
