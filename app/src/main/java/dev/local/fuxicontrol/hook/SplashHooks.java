@@ -15,6 +15,7 @@ import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.XposedModule;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import org.json.JSONObject;
@@ -34,7 +35,7 @@ final class SplashHooks {
     private volatile boolean connected;
     private volatile boolean matched;
     private volatile boolean failed;
-    private long lastReport;
+    private long lastBlocked;
     SplashHooks(XposedModule module,String name,ClassLoader loader) {
         this.module=module;this.name=name;this.loader=loader;
         HandlerThread thread=new HandlerThread("qixu-splash-report");thread.start();worker=new Handler(thread.getLooper());
@@ -63,8 +64,10 @@ final class SplashHooks {
                             type("tv.danmaku.bili.MainActivityV2"),order,boolean.class));
                     deoptimize(method("tv.danmaku.bili.splash.ad.page.HotSplashActivity","onCreate",void.class,android.os.Bundle.class));
                     Class<?> source=type("kntr.srcs.app.splash.model.SplashSource");
-                    Class<?> response=type("qj1.o");
-                    Method select=method("kntr.srcs.app.splash.core.b","a",type("qj1.q"),
+                    // Obfuscated model names, newest first: 9.16 Cj1.*, 9.15 qj1.*.
+                    Class<?> response=firstType("Cj1.y","qj1.o");
+                    Class<?> selection=firstType("Cj1.a0","qj1.q");
+                    Method select=method("kntr.srcs.app.splash.core.b","a",selection,
                             response,List.class,source,String.class,boolean.class);
                     // This release also ships the Kotlin splash pipeline. Its selection
                     // result is nullable; callers publish the normal no-order state.
@@ -76,11 +79,14 @@ final class SplashHooks {
                         return null;
                     });
                     String component="kntr.srcs.app.splash.core.SplashOrderSelectComponent";
-                    deoptimize(method(component,"b",type("qj1.q"),type(component),source,response));
+                    deoptimize(method(component,"b",selection,type(component),source,response));
                     deoptimize(method(component+"$startRealtimeShowSelect$1","invokeSuspend",Object.class,Object.class));
                 }
                 case "com.jingdong.app.mall" -> {
-                    replace(method("com.jingdong.app.mall.SplashFragment","V0",boolean.class),chain->false);
+                    // The obfuscated name changes per release (V0 in 16.1.0, W0 in 16.1.50). The
+                    // splash view check is the only private instance boolean method without parameters.
+                    replace(unique(type("com.jingdong.app.mall.SplashFragment"),m->!Modifier.isStatic(m.getModifiers())
+                            && Modifier.isPrivate(m.getModifiers()) && m.getReturnType()==boolean.class && m.getParameterCount()==0),chain->false);
                     deoptimize(method("com.jingdong.app.mall.SplashFragment","onCreateViews",android.view.View.class,android.view.LayoutInflater.class,android.os.Bundle.class));
                 }
                 case "com.autonavi.minimap" -> {
@@ -92,7 +98,59 @@ final class SplashHooks {
                     Method invoke=callback.getMethod("invoke",Object.class);
                     if(invoke.getReturnType()!=Object.class) throw new NoSuchMethodException("Function1.invoke return type");
                     // The inspected loader uses callback #3 with integer zero for its no-ad branch.
-                    replace(method("az.f","a",void.class,type("re.o"),callback,callback),chain->{invoke.invoke(chain.getArg(2),0);return null;});
+                    // Result dispatcher, newest first: 9.52 xy.f, 9.49 az.f.
+                    replace(method(firstType("xy.f","az.f").getName(),"a",void.class,type("re.o"),callback,callback),
+                            chain->{invoke.invoke(chain.getArg(2),0);return null;});
+                }
+                case "com.taobao.idlefish" -> {
+                    // Every sync, prefetch, preview and share-launch result reaches the adapters
+                    // through this accessor. A null response is Xianyu's own no-ad branch:
+                    // it dismisses the cover and ends the launch timeline.
+                    String controller="com.taobao.fleamarket.splashad.SplashAdController";
+                    Method success=method(controller,"-$$Nest$mhandleSuccessResponse",void.class,type(controller),
+                            type("com.taobao.fleamarket.splashad.protocol.SplashAdResp"),String.class,boolean.class,android.app.Activity.class);
+                    install(success,chain->{
+                        if(!installed || !enabled || failed || chain.getArg(1)==null) return chain.proceed();
+                        Object[] args=chain.getArgs().toArray();args[1]=null;
+                        report("blocked",controller+".handleSuccessResponse");
+                        return chain.proceed(args);
+                    });
+                }
+                case "com.cainiao.wireless" -> {
+                    // Cainiao skips splash requests for its "no ad request" list and routes on
+                    // normally. The check is shared with home-page ads, so answer it only
+                    // while the splash request is being decided.
+                    Method request=method("com.cainiao.wireless.homepage.view.activity.WelcomeActivity",
+                            "requestMamaAndRtbSplash",boolean.class,boolean.class);
+                    // Obfuscated name as of 8.11.1023.
+                    Method skip=method("com.cainiao.wireless.homepage.view.util.AdsUtil","azQ",boolean.class);
+                    if(!Modifier.isStatic(skip.getModifiers())) throw new NoSuchMethodException("AdsUtil skip check is not static");
+                    // The cold-start chain is small private calls that compiled onCreate can
+                    // inline down to both hooked methods; keep every link interpreted.
+                    String welcome=request.getDeclaringClass().getName();
+                    deoptimize(request);
+                    deoptimize(method(welcome,"onCreate",void.class,android.os.Bundle.class));
+                    deoptimize(method(welcome,"onCreateImpl",void.class,android.os.Bundle.class));
+                    deoptimize(method(welcome,"checkForcePermissionForApp",void.class));
+                    deoptimize(method(welcome,"gotoMainActivityInternal",void.class));
+                    deoptimize(method(welcome,"realGoHomeActivity",void.class));
+                    ThreadLocal<Boolean> deciding=new ThreadLocal<>();
+                    install(request,chain->{
+                        deciding.set(Boolean.TRUE);
+                        try {
+                            Object requested=chain.proceed();
+                            // Still set: preview or another early branch returned before the check.
+                            if(installed && enabled && !failed && Boolean.TRUE.equals(deciding.get()))
+                                report("ready","开屏判断已调用，本次未进入广告请求");
+                            return requested;
+                        } finally {deciding.remove();}
+                    });
+                    install(skip,chain->{
+                        if(!installed || !enabled || failed || !Boolean.TRUE.equals(deciding.get())) return chain.proceed();
+                        deciding.set(Boolean.FALSE);
+                        report("blocked",request.getDeclaringClass().getName()+"."+request.getName());
+                        return Boolean.TRUE;
+                    });
                 }
                 case "com.taobao.taobao" -> {
                     // Taobao handles a denied interceptor itself: normal launcher on cold
@@ -153,6 +211,21 @@ final class SplashHooks {
         Method method=type(owner).getDeclaredMethod(name,parameters);
         if(method.getReturnType()!=result) throw new NoSuchMethodException(owner+"."+name+" return type");
         method.setAccessible(true);return method;
+    }
+    private Class<?> firstType(String... names) throws ClassNotFoundException {
+        for(String name:names) {
+            try {return type(name);} catch(ClassNotFoundException next) { /* try the older name */ }
+        }
+        throw new ClassNotFoundException(String.join("|",names));
+    }
+    private static Method unique(Class<?> owner,java.util.function.Predicate<Method> filter) throws NoSuchMethodException {
+        Method found=null;
+        for(Method candidate:owner.getDeclaredMethods()) if(filter.test(candidate)) {
+            if(found!=null) throw new NoSuchMethodException(owner.getName()+": ambiguous entrypoint");
+            found=candidate;
+        }
+        if(found==null) throw new NoSuchMethodException(owner.getName()+": entrypoint missing");
+        found.setAccessible(true);return found;
     }
     private void install(Method method,XposedInterface.Hooker hook) {
         pending.add(()->handles.add(module.hook(method).intercept(hook)));
@@ -226,8 +299,11 @@ final class SplashHooks {
     private synchronized void report(String state,String detail) {
         // Count diagnostic batches, not impressions; cap work in a repeated SDK loop.
         long now=android.os.SystemClock.elapsedRealtime();
-        if(state.equals("blocked") && now-lastReport<1000) return;
-        lastReport=now;
+        // Only repeated hits are capped; a ready report must not hide the first hit.
+        if(state.equals("blocked")) {
+            if(now-lastBlocked<1000) return;
+            lastBlocked=now;
+        }
         worker.post(()->{
             try(Wire.Connection socket=connect()) {
                 Wire.send(socket,new JSONObject().put("command","report").put("package",name).put("state",state)
