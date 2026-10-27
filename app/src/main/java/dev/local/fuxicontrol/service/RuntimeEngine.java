@@ -41,6 +41,8 @@ public final class RuntimeEngine {
     private long killSequence;
     private final Map<String,Long> pendingKills=new HashMap<>();
     private boolean reconcileQueued;
+    private long periodicAt;
+    private static final long SCREEN_OFF_PERIOD_MS=60_000;
     private String lastError="";
     public RuntimeEngine(Store store,Catalog catalog,Audit audit) throws Exception {
         this.store=store;this.catalog=catalog;this.audit=audit;resources=new ResourceController(store.directory);
@@ -48,7 +50,16 @@ public final class RuntimeEngine {
         services=new ServiceController(catalog,store.directory);power=catalog.context().getSystemService(android.os.PowerManager.class);
         tasks.setRemoveOnCancelPolicy(true);
         tasks.scheduleWithFixedDelay(()-> {
-            try {if(store.get().getString("mode").equals("enforce")) reconcile(true);}
+            try {
+                if(!store.get().getString("mode").equals("enforce")) return;
+                // Lifecycle events are handled as they arrive. With the screen off, the full
+                // periodic pass only catches new processes, so run it less often.
+                long now=android.os.SystemClock.elapsedRealtime();
+                if(power!=null && !power.isInteractive() && now-periodicAt<SCREEN_OFF_PERIOD_MS) return;
+                periodicAt=now;reconcile(true);
+                long elapsed=android.os.SystemClock.elapsedRealtime()-now;
+                if(elapsed>1000) android.util.Log.w("FuxiControl","Resource reconciliation took "+elapsed+" ms");
+            }
             catch(Exception failure) {android.util.Log.e("FuxiControl","Resource reconciliation failed",failure);}
         },5,5,TimeUnit.SECONDS);
     }

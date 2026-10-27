@@ -22,9 +22,16 @@ public final class ResourceController {
         journal=dev.local.fuxicontrol.core.ResourceJournal.entries(saved,bootId);
     }
     private String persisted;
+    private long persistedAt;
     private void persist() throws Exception {
         String value=new JSONObject().put("bootId",bootId).put("entries",journal).toString();
         if(!value.equals(persisted)) {Store.atomic(journalFile,value);persisted=value;}
+        persistedAt=android.os.SystemClock.elapsedRealtime();
+    }
+    // Pruning records of exited threads needs no write-ahead; stale identities are
+    // discarded again after a restart. Coalesce those writes.
+    private void persistLazy() throws Exception {
+        if(android.os.SystemClock.elapsedRealtime()-persistedAt>=60_000) persist();
     }
     public synchronized void memory(int uid,long highMiB,long maxMiB) throws Exception {
         Path group=Path.of("/sys/fs/cgroup/apps/uid_"+uid);
@@ -121,7 +128,7 @@ public final class ResourceController {
                 if(!start(Path.of("/proc/"+key.substring(5))).equals(journal.getJSONObject(key).getString("start")))journal.remove(key);
             } catch(java.nio.file.NoSuchFileException exited) {journal.remove(key);}
         }
-        persist();
+        persistLazy();
     }
     public synchronized void finishProcesses() throws Exception {
         affinity.finish();
@@ -231,5 +238,5 @@ public final class ResourceController {
         }
         persist();
     }
-    public void flush() throws Exception {persist();}
+    public void flush() throws Exception {persistLazy();}
 }

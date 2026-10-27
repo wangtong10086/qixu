@@ -27,7 +27,7 @@ public final class Wire {
                 if(result==null || result.getInt("protocol")!=1 || result.getBinder("controller")==null)
                     throw new IOException("栖序服务未连接");
                 endpoint=IController.Stub.asInterface(result.getBinder("controller"));
-            } catch(ReflectiveOperationException e) {throw new IOException("无法发现栖序 Binder 服务",e);}
+            } catch(ReflectiveOperationException | RuntimeException e) {throw new IOException("无法发现栖序 Binder 服务",e);}
         }
         public void setSoTimeout(int millis) {timeout=millis;}
         void send(JSONObject request) throws IOException,org.json.JSONException {

@@ -186,3 +186,11 @@
 - System UI 面板的 uiautomator dump 因无法进入 idle 失败，因此未完成磁贴文字／点击与锁屏解锁端到端验收。桌面固定图标点击也未执行。
 - 全局 quick 使用 dry-run 验证筛选；由于命中真实用户应用，没有执行整机批量强停。不能将单项验收描述成全局执行已验证。
 - 测试应用策略和默认配置比较一致，临时 APK 已卸载；最终服务 enforce、lastError 为空，17 项系统钩子就绪。本轮未重启手机。
+
+## 0.7.0-alpha6：开屏钩子发现修复与写盘合并（2026-10-27）
+
+- 问题来源：实机运行 4 天，root 服务累计 CPU 13h14m、写盘 61.7 GB；息屏 20 秒采样约 35% 单核。全部 7 个开屏适配应用 `connected:false`，Vector 日志自 10-23 起 227 次 `SecurityException: Given calling package android does not match caller's uid`。
+- 根因：应用进程在 `onPackageReady` 时还没有 Application，发现路径回落到系统上下文，以 `android` 包名查询提供器。修复后改为以进程自身包名和 ApplicationThread 获取；握手首读在主线程上临时放宽 StrictMode，否则管道 poll 会触发 `NetworkOnMainThreadException`。
+- 冷启动实测：知乎 `connected:true` 并上报 `blocked`（`com.zhihu.android.sdk.launchad.f.b`）；淘宝、高德 `ready`。B站 9.16.1、小红书 9.52.0、京东 16.1.50 能连接，但入口检查失败，报 `unsupported`，已放行应用，未拦截。QQ 音乐有用户播放会话，未强停验证。
+- 亮屏、充电状态下 60 秒采样：写盘由约 23 MB 降至 1.5 MB，CPU 约 11% 单核。充电时“保持唤醒”使屏幕持续亮起，息屏 60 秒周期的效果未完成实机测量。
+- core / app 单元测试、release 构建通过；同签名 APK 经 install.py 安装，服务 enforce，lastError 为空。

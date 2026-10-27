@@ -19,29 +19,35 @@ public final class AffinityController {
     private final Map<Integer,JSONObject> processEntries=new HashMap<>();
     private String persisted;
     private boolean dirty;
+    // Entries that a later write relies on must be durable first. Removing records of
+    // exited tasks is not: identity checks discard stale entries after a restart.
+    private boolean urgent;
+    private long savedAt;
+    private static final long LAZY_SAVE_MS=60_000;
     private final long ticksPerSecond=android.system.Os.sysconf(OsConstants._SC_CLK_TCK);
     public AffinityController(Path root) throws Exception {
         topology=new CpuTopology();file=root.resolve("affinity.json");
         boot=Text.read(Path.of("/proc/sys/kernel/random/boot_id")).trim();
         journal=ResourceJournal.entries(Files.exists(file)?new JSONObject(Text.read(file)):new JSONObject().put("bootId",boot).put("entries",new JSONObject()),boot);
     }
-    private void remember(String key,JSONObject entry) throws JSONException {
+    private void remember(String key,JSONObject entry,boolean durable) throws JSONException {
         journal.put(key,entry);
         processEntries.computeIfAbsent(entry.getInt("pid"),pid->new JSONObject()).put(key,entry);
-        dirty=true;
+        dirty=true;urgent|=durable;
     }
     private void remove(String key) throws JSONException {
         JSONObject entry=journal.optJSONObject(key);
         if(entry!=null){processEntries.get(entry.getInt("pid")).remove(key);journal.remove(key);dirty=true;}
     }
     private void applied(JSONObject entry,String value) throws JSONException {
-        if(!value.equals(entry.optString("applied"))){entry.put("applied",value);dirty=true;}
+        if(!value.equals(entry.optString("applied"))){entry.put("applied",value);dirty=true;urgent=true;}
     }
     private void save() throws Exception {
-        if(!dirty)return;
+        long now=android.os.SystemClock.elapsedRealtime();
+        if(!dirty||(!urgent&&now-savedAt<LAZY_SAVE_MS))return;
         String next=new JSONObject().put("bootId",boot).put("entries",journal).toString();
         if(!next.equals(persisted)){Store.atomic(file,next);persisted=next;}
-        dirty=false;
+        dirty=false;urgent=false;savedAt=now;
     }
     static SortedSet<Integer> mask(int tid) throws ErrnoException {var value=new TreeSet<Integer>();for(int cpu:Native.getAffinity(tid))value.add(cpu);return value;}
     static String identity(Path task) throws Exception {String stat=Text.read(task.resolve("stat"));return stat.substring(stat.lastIndexOf(')')+2).split(" ")[19];}
@@ -94,7 +100,8 @@ public final class AffinityController {
                                     entry=new JSONObject().put("pid",pid).put("processStart",processStart).put("start",start)
                                         .put("before",inherited.getString("before")).put("systemBefore",inherited.getBoolean("systemBefore"))
                                         .put("applied",AffinityPolicy.format(current)).put("boundAtTicks",android.os.SystemClock.elapsedRealtime()*ticksPerSecond/1000);
-                                    remember(key,entry);
+                                    // Inherited from its creator; nothing is changed before the next save.
+                                    remember(key,entry,false);
                                 }
                             }
                             boolean ceiling=!foreground&&backgroundCeiling;
@@ -115,13 +122,13 @@ public final class AffinityController {
                             if(blocked)state.put("reason","选择的核心与系统／后台允许范围没有交集");
                             if(target.isEmpty()) {state.put("state","blocked").put("reason","当前没有允许使用的在线核心");continue;}
                             if(entry!=null&&!AffinityPolicy.format(current).equals(entry.getString("applied"))) {
-                                entry.put("before",AffinityPolicy.format(current)).put("systemBefore",current.equals(permitted));dirty=true;
+                                entry.put("before",AffinityPolicy.format(current)).put("systemBefore",current.equals(permitted));dirty=true;urgent=true;
                             }
                             if(entry==null&&!current.equals(target)) {
                                 entry=new JSONObject().put("pid",pid).put("processStart",processStart).put("start",start)
                                     .put("before",AffinityPolicy.format(current)).put("systemBefore",current.equals(permitted))
                                     .put("boundAtTicks",android.os.SystemClock.elapsedRealtime()*ticksPerSecond/1000);
-                                remember(key,entry);
+                                remember(key,entry,true);
                             }
                             if(entry!=null)applied(entry,AffinityPolicy.format(target));
                             if(!current.equals(target))changes.add(new Change(task,start,target,state,false));

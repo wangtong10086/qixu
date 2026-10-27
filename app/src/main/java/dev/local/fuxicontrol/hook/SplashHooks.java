@@ -176,6 +176,13 @@ final class SplashHooks {
     private Wire.Connection connect() throws IOException {var connection=Wire.splash();connection.setSoTimeout(500);return connection;}
     private synchronized void openWatch() throws IOException, JSONException {
         if(connected) return;
+        // The first read runs on the app main thread before any splash code. The pipe
+        // poll counts as network I/O for StrictMode; it is bounded by the 500 ms timeout.
+        var policy=android.os.StrictMode.allowThreadDiskReads();
+        android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.LAX);
+        try {openWatchLocked();} finally {android.os.StrictMode.setThreadPolicy(policy);}
+    }
+    private void openWatchLocked() throws IOException, JSONException {
         Wire.Connection socket=connect();
         try {
             Wire.send(socket,new JSONObject().put("command","watch").put("package",name));
@@ -185,7 +192,7 @@ final class SplashHooks {
             Thread watch=new Thread(()->{
                 try(socket) {String line;while((line=reader.readLine())!=null) update(new JSONObject(line));}
                 catch(IOException | JSONException e) {module.log(android.util.Log.WARN,"QixuSplash","Ad controller disconnected",e);}
-                finally {enabled=false;connected=false;}
+                finally {enabled=false;connected=false;reconnect(1000);}
             },"qixu-splash-watch");
             watch.setDaemon(true);watch.start();
         } catch(IOException | JSONException | RuntimeException e) {socket.close();throw e;}
@@ -197,6 +204,16 @@ final class SplashHooks {
             healthGeneration++;
             if(installed && enabled) {report("ready","开屏拦截已恢复");scheduleHealth();}
         }
+    }
+    // A daemon restart closes every watch. Reconnect without waiting for the next
+    // Activity resume, backing off while the service is unavailable.
+    private void reconnect(long delay) {
+        if(!installed || failed) return;
+        worker.postDelayed(()->{
+            if(connected || failed) return;
+            try {openWatch();}
+            catch(IOException | JSONException e) {reconnect(Math.min(delay*2,60_000));}
+        },delay);
     }
     private void scheduleHealth() {
         long generation=healthGeneration;
