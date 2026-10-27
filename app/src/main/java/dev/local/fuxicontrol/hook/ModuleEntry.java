@@ -24,6 +24,11 @@ public final class ModuleEntry extends XposedModule {
     private final Set<Integer> foreground=ConcurrentHashMap.newKeySet();
     private final Map<Integer,Long> lastForeground=new ConcurrentHashMap<>();
     private final Map<String,Integer> foregroundServices=new ConcurrentHashMap<>();
+    // Packages that just received FCM/MiPush. Like Android's temporary allowlist for
+    // high-priority pushes, they may finish handling it before background limits apply;
+    // otherwise blocked work plus an immediate freeze gets them killed and redelivered.
+    private final Map<String,Long> pushGrace=new ConcurrentHashMap<>();
+    private static final long PUSH_GRACE_MS=30_000;
     private final Map<String,Boolean> installed=new ConcurrentHashMap<>();
     private final LinkedBlockingQueue<JSONObject> events=new LinkedBlockingQueue<>(1024);
     private final Object stateLock=new Object();
@@ -171,13 +176,10 @@ public final class ModuleEntry extends XposedModule {
             var infoField=process.getClass().getDeclaredField("info");infoField.setAccessible(true);
             ApplicationInfo info=(ApplicationInfo)infoField.get(process);
             JSONObject p=policy(info.packageName);
-            if(enforcing() && p!=null) {
-                if(p.getBoolean("resident")) return null;
-                if(p.getString("background").equals("restricted") && !foreground.contains(info.uid) && !foregroundServices.containsValue(info.uid)) {
-                    Object[] args=chain.getArgs().toArray();args[1]=0L;
-                    return chain.proceed(args);
-                }
-            }
+            // Restricted apps keep the system freeze debounce. Freezing them with no delay
+            // got them killed for binder traffic that arrived just after they turned cached,
+            // and each later wake became a full cold start.
+            if(enforcing() && p!=null && p.getBoolean("resident")) return null;
             return chain.proceed();
         },method->method.getParameterCount()==3);
         install(loader,"native-notification","com.android.server.notification.NotificationManagerService","enqueueNotificationInternal",chain->{
@@ -227,7 +229,14 @@ public final class ModuleEntry extends XposedModule {
         p=backgroundPolicy(app.packageName,app.uid,p);
         return p!=null && p.getString("autostart").equals("deny");
     }
+    private boolean inPushGrace(String name) {
+        Long until=name==null?null:pushGrace.get(name);
+        if(until==null) return false;
+        if(android.os.SystemClock.elapsedRealtime()<until) return true;
+        pushGrace.remove(name,until);return false;
+    }
     private boolean blockedBackground(String name,int uid) throws org.json.JSONException {
+        if(inPushGrace(name)) return false;
         JSONObject p=backgroundPolicy(name,uid);
         return p!=null && (p.getString("autostart").equals("deny") || p.getString("background").equals("restricted"));
     }
@@ -247,12 +256,17 @@ public final class ModuleEntry extends XposedModule {
         return event;
     }
     private void observePush(Intent intent,int callerUid) throws org.json.JSONException {
-        if(intent==null || !("com.google.android.c2dm.intent.RECEIVE".equals(intent.getAction()) ||
-                "com.google.firebase.MESSAGING_EVENT".equals(intent.getAction()))) return;
-        JSONObject gms=policy("com.google.android.gms");
-        if(callerUid!=0 && callerUid!=1000 && (gms==null || callerUid!=gms.getInt("uid"))) return;
+        if(intent==null) return;
+        String action=intent.getAction();
+        boolean fcm="com.google.android.c2dm.intent.RECEIVE".equals(action) || "com.google.firebase.MESSAGING_EVENT".equals(action);
+        boolean mipush="com.xiaomi.mipush.RECEIVE_MESSAGE".equals(action) || "com.xiaomi.mipush.MESSAGE_ARRIVED".equals(action);
+        if(!fcm && !mipush) return;
+        JSONObject sender=policy(fcm?"com.google.android.gms":"com.xiaomi.xmsf");
+        if(callerUid!=0 && callerUid!=1000 && (sender==null || callerUid!=sender.getInt("uid"))) return;
         String name=intent.getComponent()!=null?intent.getComponent().getPackageName():intent.getPackage();
         if(name==null) return;
+        pushGrace.put(name,android.os.SystemClock.elapsedRealtime()+PUSH_GRACE_MS);
+        if(mipush) return; // Proxy notifications and audit below are FCM-specific.
         JSONObject settings=snapshot.optJSONObject("pushProxy");
         JSONObject channel=settings==null?null:settings.optJSONObject(name);
         boolean proxyEligible=enforcing() && channel!=null && channel.optBoolean("enabled");
